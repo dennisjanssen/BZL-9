@@ -213,6 +213,25 @@ constexpr lv_coord_t kBrowOverhang = 4;  // wedge starts this far above the eye'
 // a sustained droop has to survive that.
 float basePitch = 0;
 
+// --- Snore bubble ---
+// Replaces the old "Zzz" text label. Two reasons: text needed a whole
+// font compiled in (~13.5KB of flash for three glyphs), and an inflating
+// bubble that pops reads as sleeping without asking anyone to read
+// anything. Unlike the bottle and the cloud this DOES composite through
+// renderFace(), because it belongs to the face -- it comes out of its
+// mouth and has to move with it.
+lv_obj_t *snoreBubble = nullptr;
+bool snoreBubbleVisible = false;
+constexpr lv_coord_t kBubbleMin = 5;
+constexpr lv_coord_t kBubbleMax = 24;
+// Just off the side of the mouth, clear of the right eye above it.
+constexpr lv_coord_t kBubbleCx = kFaceCenterX + 40;
+constexpr lv_coord_t kBubbleCy = kMouthCenterY + kMouthRadius - 6;
+
+// Defined with the snore machinery further down; clearExpressionDecorations
+// needs it before that point.
+void hideSnoreBubble();
+
 // Glitch channel-split ghosts. Declared up here because renderFace() has
 // to composite them: they ARE the eyes drawn offset, so they must be built
 // from the same live geometry or the split drifts off the face. The old
@@ -295,6 +314,7 @@ struct Channels {
   float mouthSkew = 0;              // -1 .. +1, slides the curve sideways (smirk)
   float mouthOpen = 0;              // 0 .. 1, thickens the arc band (mouth opening)
   float gapeScale = 0;              // 0 .. 1, size of the round open mouth
+  float bubbleScale = 0;            // 0 .. 1, snore bubble inflation
   float headYaw = 0;                // -1 .. +1, pseudo-3D head turn
   float headPitch = 0;              // -1 .. +1, pseudo-3D nod
   float shadesDropY = 0;            // sunglasses slide-in offset, 0 = seated
@@ -385,6 +405,13 @@ void renderFace() {
     placeGhost(glitchGhostRedR, kEyeRightCenterX, wR, hR, -glitchSplitX, -glitchSplitY);
     placeGhost(glitchGhostCyanL, kEyeLeftCenterX, wL, hL, glitchSplitX, glitchSplitY);
     placeGhost(glitchGhostCyanR, kEyeRightCenterX, wR, hR, glitchSplitX, glitchSplitY);
+  }
+
+  if (snoreBubbleVisible) {
+    lv_coord_t bd = static_cast<lv_coord_t>(kBubbleMin +
+                                            (kBubbleMax - kBubbleMin) * ch.bubbleScale);
+    lv_obj_set_size(snoreBubble, bd, bd);
+    placeCentred(snoreBubble, kBubbleCx, kBubbleCy, bd, bd);
   }
 
   // Brows ride each eye's current top edge, so a blink or a squint carries
@@ -1274,7 +1301,8 @@ lv_obj_t *bottleFill = nullptr;
 lv_obj_t *bottleCap = nullptr;
 // 1.0 = full, 0.0 = drunk empty. Not an animation channel: the bottle is
 // an object in the scene, not part of the face, so it deliberately does
-// NOT ride renderFace()'s compositing (same reasoning as the Zzz label).
+// NOT ride renderFace()'s compositing: it is a prop in the scene, not
+// part of the face.
 // It must not breathe or lean with the face -- the face leans toward IT.
 float bottleLevel = 1.0f;
 
@@ -1304,7 +1332,7 @@ void setBottleVisible(bool visible) {
 }
 
 // --- Rain-forecast cameo: a cloud drifts in and rains a little ---
-// Scenery, not face: like the bottle and the Zzz, these are positioned
+// Scenery, not face: like the bottle, these are positioned
 // directly rather than composited through renderFace(), because they are
 // objects in the world that the face looks AT. They sit in the empty strip
 // to the left of the face (the face spans x 78..242), where the bottle on
@@ -1325,12 +1353,6 @@ lv_obj_t *rainDrops[kRainDropCount] = {nullptr, nullptr, nullptr};
 float cloudIn = 0.0f;
 bool rainCameoActive = false;
 
-// --- Sleepy "Zzz" indicator ---
-lv_obj_t *zzzLabel = nullptr;
-// Resting position. The snore animation drifts the label up from here and
-// puts it back, so this has to be a named constant rather than inline.
-constexpr lv_coord_t kZzzX = kEyeRightX + kEyeWidth - 8;
-constexpr lv_coord_t kZzzY = kEyeTop - 22;
 
 // --- Express-only decorations ---
 
@@ -1546,7 +1568,7 @@ void clearExpressionDecorations(lv_timer_t *) {
   setHeartVisible(false);
   stopShockLook();
   setShockMouthVisible(false);
-  lv_obj_add_flag(zzzLabel, LV_OBJ_FLAG_HIDDEN);
+  hideSnoreBubble();
   setBottleVisible(false);
   // Same reasoning as hideGlitch(): repeat_count=1 means LVGL deletes this
   // timer right after this callback returns -- must not delete it again
@@ -2002,35 +2024,54 @@ void stopSleepyYawns() {
 
 // --- Sleeping: snoring ---
 // One cycle is a long inhale with the mouth falling open into a small O,
-// then a slower exhale, with the Zzz drifting up and fading over the top.
+// then a slower exhale, with a bubble swelling and popping over the top.
 constexpr uint32_t kSnoreCycleMs = 4200;
 lv_timer_t *snoreTimer = nullptr;
 
-void zzzFloatExecCb(void *, int32_t permille) {
-  float t = permille / 1000.0f;
-  // Set directly rather than through renderFace(): the Zzz deliberately
-  // drifts on its own path instead of riding the face like the brows and
-  // sunglasses do, and nothing else writes its position.
-  lv_obj_set_y(zzzLabel, static_cast<lv_coord_t>(kZzzY - t * 18.0f));
-  float a = (t < 0.30f) ? (t / 0.30f) : ((t > 0.70f) ? (1.0f - t) / 0.30f : 1.0f);
-  if (a < 0.0f) a = 0.0f;
-  lv_obj_set_style_text_opa(zzzLabel, static_cast<lv_opa_t>(a * 255.0f), LV_PART_MAIN);
+void bubbleScaleExecCb(void *, int32_t permille) {
+  ch.bubbleScale = permille / 1000.0f;
+  renderFace();
 }
 
-void snoreTickCb(lv_timer_t *) {
-  // The round mouth stays swapped in for the whole of sleep and just
-  // breathes between a barely-parted 8px and a slack ~22px.
+// The bubble vanishing at full size IS the pop -- no shrink, no fade. An
+// abrupt disappearance is what reads as bursting; easing it out just looks
+// like it deflated.
+void bubblePopCb(lv_anim_t *) {
+  snoreBubbleVisible = false;
+  ch.bubbleScale = 0.0f;
+  lv_obj_add_flag(snoreBubble, LV_OBJ_FLAG_HIDDEN);
+  renderFace();
+}
+
+// One breath: the mouth falls open and a bubble inflates from it, then the
+// bubble pops. Shared by the sleeping snore loop and the one-shot `sleepy`
+// expression.
+void playSnoreBeat() {
   playChannelOutAndBack(gapeScaleExecCb, 520, 1500, 1400, 250);
 
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, zzzLabel);
-  lv_anim_set_exec_cb(&a, zzzFloatExecCb);
-  lv_anim_set_values(&a, 0, 1000);
-  lv_anim_set_time(&a, kSnoreCycleMs - 200);
-  lv_anim_set_path_cb(&a, lv_anim_path_linear);
-  lv_anim_start(&a);
+  snoreBubbleVisible = true;
+  ch.bubbleScale = 0.0f;
+  lv_obj_clear_flag(snoreBubble, LV_OBJ_FLAG_HIDDEN);
+
+  lv_anim_t b;
+  lv_anim_init(&b);
+  lv_anim_set_var(&b, &ch);
+  lv_anim_set_exec_cb(&b, bubbleScaleExecCb);
+  lv_anim_set_values(&b, 0, 1000);
+  lv_anim_set_time(&b, 2100);
+  lv_anim_set_path_cb(&b, lv_anim_path_ease_out);  // swells fast, then strains
+  lv_anim_set_ready_cb(&b, bubblePopCb);
+  lv_anim_start(&b);
 }
+
+void hideSnoreBubble() {
+  lv_anim_del(&ch, bubbleScaleExecCb);
+  snoreBubbleVisible = false;
+  ch.bubbleScale = 0.0f;
+  lv_obj_add_flag(snoreBubble, LV_OBJ_FLAG_HIDDEN);
+}
+
+void snoreTickCb(lv_timer_t *) { playSnoreBeat(); }
 
 void startSnoring() {
   if (snoreTimer != nullptr) return;
@@ -2052,9 +2093,7 @@ void stopSnoring() {
   // A shock reaction owns the gape for its 2.5s; a mood change landing in
   // the middle of one must not snatch the open mouth back off it.
   if (gapeMode != GapeMode::SHOCK) setGapeMode(GapeMode::HIDDEN);
-  lv_anim_del(zzzLabel, zzzFloatExecCb);
-  lv_obj_set_y(zzzLabel, kZzzY);
-  lv_obj_set_style_text_opa(zzzLabel, LV_OPA_COVER, LV_PART_MAIN);
+  hideSnoreBubble();
   renderFace();
 }
 
@@ -2326,12 +2365,18 @@ void init() {
   lv_obj_add_flag(bottleFill, LV_OBJ_FLAG_HIDDEN);
   updateBottleFill();
 
-  // Sleepy "Zzz".
-  zzzLabel = lv_label_create(lv_scr_act());
-  lv_label_set_text(zzzLabel, "Zzz");
-  lv_obj_set_style_text_color(zzzLabel, lv_color_white(), LV_PART_MAIN);
-  lv_obj_set_pos(zzzLabel, kZzzX, kZzzY);
-  lv_obj_add_flag(zzzLabel, LV_OBJ_FLAG_HIDDEN);
+  // Snore bubble: an outline, not a blob -- a filled circle reads as a
+  // ball, whereas a ring reads as something inflated.
+  snoreBubble = lv_obj_create(lv_scr_act());
+  lv_obj_remove_style(snoreBubble, nullptr, LV_PART_MAIN | LV_STATE_ANY);
+  lv_obj_clear_flag(snoreBubble, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_opa(snoreBubble, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_color(snoreBubble, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_border_width(snoreBubble, 2, LV_PART_MAIN);
+  lv_obj_set_style_border_opa(snoreBubble, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(snoreBubble, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_size(snoreBubble, kBubbleMin, kBubbleMin);
+  lv_obj_add_flag(snoreBubble, LV_OBJ_FLAG_HIDDEN);
 
   // Wide-open "gasp" mouth for shock -- a filled oval swapped in for the
   // usual thin arc, rather than trying to stretch the arc into looking
@@ -2537,7 +2582,6 @@ void applyMoodState(MoodEngine::State state) {
   int32_t breathAmp = 150;
   uint32_t flourishMin = 7000;
   uint32_t flourishMax = 19000;
-  bool showZzz = false;
   bool showBottle = false;
   bool wantSnore = false;
   bool wantYawns = false;
@@ -2554,9 +2598,14 @@ void applyMoodState(MoodEngine::State state) {
       // Eyes shut, head down, snoring. Breathing goes slow and deep.
       targetEyeHeight = static_cast<lv_coord_t>(kEyeHeight * 0.07f);
       targetPitch = 0.30f;
-      breathHalfMs = 3800;
-      breathAmp = 260;
-      showZzz = true;
+      // Phase-locked to the snore, and inverted. Half a snore cycle, so
+      // one rise-and-fall per breath; NEGATIVE amplitude so the face
+      // rises while the mouth is opening rather than sinking into it --
+      // startBreathing() animates -amp -> +amp, so a negative value
+      // starts it at the top. Both animations are kicked off in the same
+      // applyMoodState() call, which is what keeps them in step.
+      breathHalfMs = kSnoreCycleMs / 2;
+      breathAmp = -340;
       wantSnore = true;
       level = IdleLevel::MINIMAL;
       break;
@@ -2674,11 +2723,6 @@ void applyMoodState(MoodEngine::State state) {
       stopPostureRoutine();
     }
 
-    if (showZzz) {
-      lv_obj_clear_flag(zzzLabel, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(zzzLabel, LV_OBJ_FLAG_HIDDEN);
-    }
     // The routine itself shows the bottle (and fills it); this only has to
     // take it away when the reminder is over.
     if (!showBottle) setBottleVisible(false);
@@ -2727,7 +2771,9 @@ void triggerExpression(const char *expression) {
     playShake(kExpressionHoldMs, 3);  // sustained tremor for as long as rage is shown
   } else if (strcmp(expression, "sleepy") == 0) {
     animateExpressionTo(static_cast<lv_coord_t>(kEyeHeight * 0.15f), kMouthAngleStart, kMouthAngleEnd, 0);
-    lv_obj_clear_flag(zzzLabel, LV_OBJ_FLAG_HIDDEN);
+    // One snore beat rather than the old Zzz -- it is a 2.5s one-shot, so
+    // a single bubble is the whole gag.
+    if (gapeMode == GapeMode::HIDDEN) playSnoreBeat();
   } else if (strcmp(expression, "unimpressed") == 0) {
     // Half-lidded eyes over a short flat mouth -- the flat, unbothered
     // look from the reference sheet.

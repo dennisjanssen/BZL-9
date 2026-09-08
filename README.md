@@ -112,7 +112,8 @@ dropped overnight so a forgotten one does not outlive the day.
 
 **Sleep schedule** — gets visibly sleepy for a configurable window before your
 workday ends (heavy lids, drooping head, yawning), then sleeps once it is over:
-eyes shut, `Zzz` drifting, and a snore. Brightness fades to the sleep level.
+eyes shut, and a snore — the face rises as the mouth falls open and a bubble
+inflates from it, then pops. Brightness fades to the sleep level.
 
 **Reminders** — on their own intervals, it drinks from a blue water bottle that
 visibly empties over four sips, and does a stretch-then-walk routine for posture.
@@ -211,6 +212,13 @@ USB flash (you cannot OTA into a new layout) and it wipes the filesystem.
 Beyond that, roughly 36 KB of unused LVGL widget classes are linked because the
 default theme references every enabled widget — disabling the ones this project
 never creates is the next easiest win.
+
+**No font is compiled in.** `LV_FONT_DEFAULT` is `NULL` and every montserrat font
+is disabled, because the display draws nothing but shapes — that is worth ~14 KB.
+This is only safe while nothing renders text: LVGL stores the pointer in theme and
+draw descriptors but never dereferences it unless a label or a symbol background
+image is actually drawn. **Re-enable a font in `include/lv_conf.h` before adding
+any `lv_label`.**
 
 ---
 
