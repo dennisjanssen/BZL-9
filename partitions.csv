@@ -1,0 +1,13 @@
+# Name,      Type, SubType,   Offset,   Size,      Flags
+# REVISED again at Stage 4: adding WiFi/ESPAsyncWebServer/ArduinoJson/
+# ElegantOTA/LittleFS/DNSServer pushed the firmware to ~1.44MB, over the
+# 1.25MB OTA slots sized back at Stage 1 (which only accounted for the
+# bring-up build). Grew each OTA slot to 1.6875MB (a WiFi+web+LVGL+OTA
+# firmware on a 4MB part is inherently tight -- there isn't room to be
+# generous everywhere), shrinking LittleFS accordingly since the actual
+# web assets are only a few small files (~15KB total).
+nvs,        data, nvs,       0x9000,   0x5000,
+otadata,    data, ota,       0xe000,   0x2000,
+app0,       app,  ota_0,     0x10000,  0x1B0000,
+app1,       app,  ota_1,     0x1C0000, 0x1B0000,
+littlefs,   data, littlefs,  0x370000, 0x90000,

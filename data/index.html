@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K-VRC Companion</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>K-VRC Companion</h1>
+  <span id="conn-badge" class="badge">connecting&hellip;</span>
+</header>
+
+<main>
+  <section id="status-card" class="card">
+    <div class="state-row">
+      <span id="state-value" class="state">&mdash;</span>
+      <span id="time-unknown" class="warn" hidden>time unknown</span>
+    </div>
+    <dl class="facts">
+      <dt>Uptime</dt><dd id="f-uptime">&mdash;</dd>
+      <dt>Wi-Fi</dt><dd id="f-wifi">&mdash;</dd>
+      <dt>Weather</dt><dd id="f-weather">&mdash;</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Mood</h2>
+    <div class="button-grid" id="mood-grid">
+      <button data-mood="auto">Auto</button>
+      <button data-mood="neutral">Neutral</button>
+      <button data-mood="bored">Bored</button>
+      <button data-mood="excited">Excited</button>
+      <button data-mood="focused">Focused</button>
+      <button data-mood="sleepy">Sleepy</button>
+    </div>
+    <p class="hint">Auto rotates moods every few minutes. A fixed mood holds until you change it, and clears overnight.</p>
+  </section>
+
+  <section class="card">
+    <h2>Express</h2>
+    <div class="button-grid" id="express-grid">
+      <button data-expr="shock">Shock</button>
+      <button data-expr="heart">Heart</button>
+      <button data-expr="rage">Rage</button>
+      <button data-expr="sleepy">Sleepy</button>
+      <button data-expr="glitch">Glitch</button>
+      <button data-expr="hydrate">Hydrate</button>
+      <button data-expr="unimpressed">Unimpressed</button>
+      <button data-expr="grin">Grin</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Configuration</h2>
+    <form id="config-form">
+      <div class="field-row">
+        <label for="c-workday-start">Workday start</label>
+        <input type="time" id="c-workday-start" name="workdayStartMinutes">
+      </div>
+      <div class="field-row">
+        <label for="c-workday-end">Workday end</label>
+        <input type="time" id="c-workday-end" name="workdayEndMinutes">
+      </div>
+      <div class="field-row">
+        <label for="c-timezone">Timezone (POSIX TZ)</label>
+        <input type="text" id="c-timezone" name="timezone">
+      </div>
+      <div class="field-row">
+        <label for="c-hydration">Hydration reminder (min)</label>
+        <input type="number" id="c-hydration" name="hydrationIntervalMinutes" min="5" max="480">
+      </div>
+      <div class="field-row">
+        <label for="c-posture">Posture reminder (min)</label>
+        <input type="number" id="c-posture" name="postureIntervalMinutes" min="5" max="480">
+      </div>
+      <div class="field-row">
+        <label for="c-sleepy-lead">Sleepy before end (min)</label>
+        <input type="number" id="c-sleepy-lead" name="sleepyLeadMinutes" min="5" max="240">
+      </div>
+      <div class="field-row">
+        <label for="c-lat">Latitude</label>
+        <input type="number" id="c-lat" name="latitude" step="0.0001" min="-90" max="90">
+      </div>
+      <div class="field-row">
+        <label for="c-lon">Longitude</label>
+        <input type="number" id="c-lon" name="longitude" step="0.0001" min="-180" max="180">
+      </div>
+      <div class="field-row">
+        <label for="c-wx-interval">Weather poll (min)</label>
+        <input type="number" id="c-wx-interval" name="weatherPollIntervalMinutes" min="5" max="180">
+      </div>
+      <div class="field-row">
+        <label for="c-active-br">Active brightness (%)</label>
+        <input type="number" id="c-active-br" name="activeBrightnessPercent" min="1" max="50">
+      </div>
+      <div class="field-row">
+        <label for="c-sleep-br">Sleep brightness (%)</label>
+        <input type="number" id="c-sleep-br" name="sleepBrightnessPercent" min="0" max="50">
+      </div>
+      <div class="field-row">
+        <label for="c-led-on">Onboard LED</label>
+        <input type="checkbox" id="c-led-on" name="ledEnabled">
+      </div>
+      <div class="field-row">
+        <label for="c-led-color">LED colour</label>
+        <input type="color" id="c-led-color" name="ledColor">
+      </div>
+      <div class="field-row">
+        <label for="c-flip">Flip display 180&deg;</label>
+        <input type="checkbox" id="c-flip" name="displayFlipped">
+      </div>
+      <div class="field-row">
+        <label for="c-wifi-ssid">Wi-Fi SSID</label>
+        <input type="text" id="c-wifi-ssid" name="wifiSsid" maxlength="32">
+      </div>
+      <div class="field-row">
+        <label for="c-wifi-pass">Wi-Fi password</label>
+        <input type="password" id="c-wifi-pass" name="wifiPassword" maxlength="64" placeholder="leave blank to keep current">
+      </div>
+      <p id="config-msg" class="msg" hidden></p>
+      <button type="submit">Save</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Device</h2>
+    <div class="button-row">
+      <button id="btn-reboot" class="danger">Reboot</button>
+      <a href="/update">Firmware update&hellip;</a>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
