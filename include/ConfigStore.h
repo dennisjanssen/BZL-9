@@ -80,7 +80,7 @@ struct Config {
   // leaving it blank would mean an *unauthenticated* /update endpoint out
   // of the box, which undercuts "gate it behind a password". Change this
   // via the portal before relying on it for anything.
-  char otaPassword[65] = "kvrc-setup";
+  char otaPassword[65] = "bzl9-setup";
 
   bool operator==(const Config &o) const { return memcmp(this, &o, sizeof(Config)) == 0; }
 };

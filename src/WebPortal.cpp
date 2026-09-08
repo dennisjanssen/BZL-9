@@ -126,10 +126,10 @@ void startApFallback() {
   // ASSUMPTION: open AP (no password) for ease of first-time setup --
   // brief doesn't specify one. Anyone in range can reach the config
   // portal while provisioning is incomplete.
-  WiFi.softAP("K-VRC-Companion");
+  WiFi.softAP("BZL-9-Companion");
   dnsServer.start(53, "*", apIP);
   apActive = true;
-  Serial.println("[WebPortal] AP fallback active: K-VRC-Companion (open)");
+  Serial.println("[WebPortal] AP fallback active: BZL-9-Companion (open)");
 }
 
 void beginStaAttempt() {

@@ -14,7 +14,18 @@ Preferences prefs;
 Config current;
 SemaphoreHandle_t mutex = nullptr;
 
-constexpr const char *kNamespace = "kvrc";
+// The NVS namespace every stored setting lives under. Renamed from "kvrc"
+// with the project; the user accepted re-provisioning over the AP rather
+// than writing a key-copying migration, so anything stored under the old
+// name is simply abandoned (and erased -- see kLegacyNamespace below).
+// NVS namespace names are capped at 15 characters.
+constexpr const char *kNamespace = "bzl9";
+
+// The pre-rename namespace. Its contents are dead but would otherwise sit
+// in NVS forever taking up entries, so begin() erases it once. Safe to
+// delete this and the eraseLegacyNamespace() call together once no device
+// is likely to still be carrying pre-rename storage.
+constexpr const char *kLegacyNamespace = "kvrc";
 
 // RAII guard so every public function below just declares one of these
 // instead of manually pairing take/give at each return point.
@@ -55,7 +66,7 @@ void loadAll() {
   prefs.getString("wifiPass", current.wifiPassword, sizeof(current.wifiPassword));
   prefs.getString("otaPass", current.otaPassword, sizeof(current.otaPassword));
   if (strlen(current.otaPassword) == 0) {
-    strncpy(current.otaPassword, "kvrc-setup", sizeof(current.otaPassword) - 1);
+    strncpy(current.otaPassword, "bzl9-setup", sizeof(current.otaPassword) - 1);
   }
 }
 
@@ -91,6 +102,15 @@ void migrate() {
 
 }  // namespace
 
+// Reclaims the pre-rename namespace. Idempotent: on a device that never
+// had one, this opens an empty namespace, clears nothing and closes again.
+void eraseLegacyNamespace() {
+  Preferences legacy;
+  if (!legacy.begin(kLegacyNamespace, false)) return;
+  legacy.clear();
+  legacy.end();
+}
+
 void begin() {
   // Called once at boot, before WebPortal exists -- no concurrent access
   // is possible yet, so loadAll()/migrate() run unlocked. The mutex only
@@ -101,6 +121,8 @@ void begin() {
   // missing, and every getter above supplies its documented default for
   // any key that isn't present -- so a blank or damaged store just
   // resolves to all-defaults rather than failing.
+  eraseLegacyNamespace();
+
   prefs.begin(kNamespace, false);
   loadAll();
   migrate();
