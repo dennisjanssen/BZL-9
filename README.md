@@ -232,6 +232,44 @@ sourced from. Anything genuinely undecided is marked `ASSUMPTION` in the source.
 
 ---
 
+## License
+
+This project's own code is **MIT** — see [LICENSE](LICENSE). Use it, change it,
+build on it, put it in something you sell. The one condition is that the
+copyright notice travels with it, so nobody can pass the work off as entirely
+their own.
+
+If you build something from this, a link back is appreciated but not required.
+
+### Dependency licenses matter if you ship binaries
+
+The libraries are fetched by PlatformIO rather than vendored here, so this
+repository is MIT throughout. A **compiled firmware image** is another matter,
+because it links:
+
+| Library | License |
+|---|---|
+| LVGL | MIT |
+| ArduinoJson | MIT |
+| LovyanGFX | MIT AND BSD-2-Clause |
+| ESPAsyncWebServer | **LGPL-3.0** |
+| AsyncTCP | **LGPL-3.0** |
+| ElegantOTA 3.x | **AGPL-3.0** |
+
+ElegantOTA in particular is AGPL-3.0, which is strong copyleft and is triggered
+by network use — and this project uses it to serve a web page. In practice that
+means anyone **distributing built firmware** owes recipients the complete
+corresponding source under compatible terms. Publishing your fork's source, as
+this repo does, satisfies that; shipping closed binaries would not.
+
+If you want to distribute a closed-source product built on this, ElegantOTA sells
+a commercial license, or you can replace it with your own upload endpoint.
+
+*Not legal advice — just the licenses as they actually stand, so nobody is
+surprised later.*
+
+---
+
 ## Credits and scope
 
 Inspired by the little robot from *Love, Death & Robots*, but the face here is
