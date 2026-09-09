@@ -82,6 +82,20 @@ form { display: flex; flex-direction: column; gap: 0.6rem; }
 .field-row input[type="checkbox"] { width: 18px; height: 18px; justify-self: start; }
 .field-row input[type="color"] { width: 48px; height: 30px; padding: 2px; justify-self: start; }
 .field-row input { font: inherit; padding: 0.4rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.site-footer {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem 1.5rem;
+  text-align: center;
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+/* Not .card a -- that rule paints links as buttons, for the firmware
+   update link. This one stays text. */
+.site-footer a { color: var(--muted); }
+.site-footer a:hover { color: var(--accent); }
+.site-footer span { display: block; }
 .msg { font-size: 0.85rem; }
 .msg.ok { color: #2e7d32; }
 .msg.error { color: var(--danger); }
