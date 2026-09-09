@@ -44,7 +44,7 @@ const char *stateName(MoodEngine::State s) {
     case MoodEngine::State::FOCUSED: return "FOCUSED";
     case MoodEngine::State::GLITCHED: return "GLITCHED";
     case MoodEngine::State::HYDRATION_REMINDER: return "HYDRATION_REMINDER";
-    case MoodEngine::State::POSTURE_REMINDER: return "POSTURE_REMINDER";
+    case MoodEngine::State::MOVEMENT_REMINDER: return "MOVEMENT_REMINDER";
   }
   return "?";
 }
@@ -61,8 +61,8 @@ struct ConfigUpdatePayload {
   char timezone[64] = "";
   bool hasHydrationInterval = false;
   uint16_t hydrationInterval = 0;
-  bool hasPostureInterval = false;
-  uint16_t postureInterval = 0;
+  bool hasMovementInterval = false;
+  uint16_t movementInterval = 0;
   bool hasSleepyLead = false;
   uint16_t sleepyLead = 0;
   bool hasLatitude = false;
@@ -217,7 +217,7 @@ void applyCommand(const Command &cmd) {
         configTzTime(c.timezone, "pool.ntp.org", "time.nist.gov");
       }
       if (c.hasHydrationInterval) ConfigStore::setHydrationIntervalMinutes(c.hydrationInterval);
-      if (c.hasPostureInterval) ConfigStore::setPostureIntervalMinutes(c.postureInterval);
+      if (c.hasMovementInterval) ConfigStore::setMovementIntervalMinutes(c.movementInterval);
       if (c.hasSleepyLead) ConfigStore::setSleepyLeadMinutes(c.sleepyLead);
       if (c.hasLatitude) ConfigStore::setLatitude(c.latitude);
       if (c.hasLongitude) ConfigStore::setLongitude(c.longitude);
@@ -328,7 +328,7 @@ void handleExpress(AsyncWebServerRequest *request, JsonVariant &json) {
   const char *expr = json["expression"];
   static const char *kValid[] = {"shock",   "heart",   "rage",        "sleepy",
                                 "glitch",  "hydrate", "unimpressed", "grin",
-                                "wave",    "whistle", "posture"};
+                                "wave",    "whistle", "movement"};
   bool ok = false;
   for (const char *v : kValid) {
     if (strcmp(expr, v) == 0) {
@@ -382,7 +382,7 @@ void handleGetConfig(AsyncWebServerRequest *request) {
   doc["workdayEndMinutes"] = cfg.workdayEndMinutes;
   doc["timezone"] = cfg.timezone;
   doc["hydrationIntervalMinutes"] = cfg.hydrationIntervalMinutes;
-  doc["postureIntervalMinutes"] = cfg.postureIntervalMinutes;
+  doc["movementIntervalMinutes"] = cfg.movementIntervalMinutes;
   doc["sleepyLeadMinutes"] = cfg.sleepyLeadMinutes;
   doc["latitude"] = cfg.latitude;
   doc["longitude"] = cfg.longitude;
@@ -447,11 +447,11 @@ void handlePostConfig(AsyncWebServerRequest *request, JsonVariant &json) {
     c.hasHydrationInterval = true;
     c.hydrationInterval = static_cast<uint16_t>(v);
   }
-  if (json["postureIntervalMinutes"].is<int>()) {
-    int v = json["postureIntervalMinutes"];
-    if (!validateRange(request, "postureIntervalMinutes", v, 5, 480)) return;
-    c.hasPostureInterval = true;
-    c.postureInterval = static_cast<uint16_t>(v);
+  if (json["movementIntervalMinutes"].is<int>()) {
+    int v = json["movementIntervalMinutes"];
+    if (!validateRange(request, "movementIntervalMinutes", v, 5, 480)) return;
+    c.hasMovementInterval = true;
+    c.movementInterval = static_cast<uint16_t>(v);
   }
   if (json["sleepyLeadMinutes"].is<int>()) {
     int v = json["sleepyLeadMinutes"];

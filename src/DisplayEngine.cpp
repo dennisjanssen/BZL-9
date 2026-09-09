@@ -379,7 +379,7 @@ struct Channels {
   float squintL = 1.0f, squintR = 1.0f;  // 0..1, per eye (skeptical squint)
   float breathY = 0;                // continuous breathing bob -- never stops
   float tiltTenths = 0;             // head tilt, tenths of a degree
-  float faceOffX = 0, faceOffY = 0; // whole-face offset (posture / shake / shiver)
+  float faceOffX = 0, faceOffY = 0; // whole-face offset (walk / shake / shiver)
   float mouthBias = 0;              // -1 narrow .. +1 wide, relative to baseline
   float mouthSkew = 0;              // -1 .. +1, slides the curve sideways (smirk)
   float mouthOpen = 0;              // 0 .. 1, thickens the arc band (mouth opening)
@@ -1940,8 +1940,11 @@ void playGlitchEffect() {
   lv_timer_set_repeat_count(glitchEndTimer, 1);
 }
 
-// --- Posture reminder: whole face stretches upward, then settles ---
-void postureExecCb(void *, int32_t offsetY) {
+// Whole-face vertical offset, in pixels. Shared by everything that moves
+// the face bodily -- the walk, the whistle bob, the wave recoil -- because
+// a second callback on the same channel would not replace the first, it
+// would fight it.
+void faceOffYExecCb(void *, int32_t offsetY) {
   ch.faceOffY = static_cast<float>(offsetY);
   renderFace();
 }
@@ -2046,66 +2049,150 @@ void stopHydrationRoutine() {
   renderFace();
 }
 
-// --- Posture: stretch, then a few steps on the spot ---
-// Two halves, because the reminder is really saying two things: sit up,
-// and get up. The stretch reaches, holds and settles; then the face bobs
-// vertically a few times, which reads as footsteps.
-lv_timer_t *postureTimer = nullptr;
-lv_timer_t *postureWalkTimer = nullptr;
+// --- Movement reminder: gets up and walks a lap around the visor ---
+// This was a stretch-on-the-spot, which read as "the face is doing
+// something" rather than as "get up". Walking away is unambiguous.
+//
+// The circle is faked the way 2D animation has always faked one. There is
+// no scale channel to shrink the face with, so depth is carried by two
+// other cues: height on screen (the far side of the lap sits higher) and
+// the yaw cylinder, which turns the head into its direction of travel.
+// Position, lift, lean and turn are all derived from a single angle, so
+// they cannot drift out of sync with each other.
+//
+// Driven by one tick timer rather than a set of lv_anims. The four
+// channels it writes -- faceOffX/Y, tilt, yaw -- are exactly the ones the
+// idle flourishes also reach for, and a walk assembled from overlapping
+// animations would have to win that race on every frame. The reminder
+// runs at IdleLevel::REDUCED, which stops the flourishes, and the tick
+// then owns those channels outright.
+constexpr uint32_t kWalkTickMs = 30;
+constexpr uint32_t kWalkRiseMs = 850;
+constexpr uint32_t kWalkLapMs = 3600;
+constexpr uint32_t kWalkLaps = 2;
+constexpr uint32_t kWalkSettleMs = 700;
 
-void postureWalkCb(lv_timer_t *) {
-  // repeat_count=1 auto-frees this timer on return -- only drop the
-  // reference, never delete it from in here.
-  postureWalkTimer = nullptr;
+// Horizontal half-width of the lap.
+//
+// These three amplitudes were picked by simulating the whole routine and
+// taking the bounding box of every feature, not by eye: yaw pushes the
+// outer eye ~100px from the face centre, and the waddle then rotates it
+// about that arm, so the tilt costs far more vertical travel than its 3.4
+// degrees suggests. At these values the worst frame of the walk leaves
+// 14px of side margin and 7px above the eyes.
+constexpr float kWalkRadiusX = 52.0f;
+// How much higher the far side of the lap sits than the near side. Also
+// the stand-up lift, so the rise ends exactly where the walk begins.
+constexpr float kWalkLiftY = 14.0f;
+constexpr float kWalkStepPx = 4.0f;         // footstep bounce
+constexpr float kWalkWaddleTenths = 34.0f;  // +-3.4 degrees, once per step pair
+constexpr float kWalkYaw = 0.85f;
+// Step pairs per lap. Each carries two footsteps, so this is 8 steps per
+// 3.6s lap -- an unhurried walking pace.
+constexpr float kWalkStepPairsPerLap = 4.0f;
 
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, &ch);
-  lv_anim_set_exec_cb(&a, postureExecCb);
-  lv_anim_set_values(&a, 0, -5);
-  lv_anim_set_time(&a, 190);
-  lv_anim_set_playback_time(&a, 190);
-  lv_anim_set_repeat_count(&a, 4);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-  lv_anim_start(&a);
+constexpr float kWalkPi = 3.14159265f;
+
+lv_timer_t *movementTimer = nullptr;      // recurring: restarts the routine
+lv_timer_t *movementWalkTimer = nullptr;  // the walk itself, ~33Hz
+uint32_t walkElapsedMs = 0;
+
+void walkSetPose(float x, float y, float tiltTenths, float yaw) {
+  ch.faceOffX = x;
+  ch.faceOffY = y;
+  ch.tiltTenths = tiltTenths;
+  ch.headYaw = yaw;
+  renderFace();
 }
 
-void postureRoutineCb(lv_timer_t *) {
-  // Reach up and hold. The eyes squeeze and the mouth opens with the effort.
-  playChannelOutAndBack(postureExecCb, -16, 500, 620, 700, lv_anim_path_ease_out);
-  playEyeScale(260, 500, 620, 700);
-  playChannelOutAndBack(mouthOpenExecCb, 520, 500, 620, 700);
+void movementWalkTickCb(lv_timer_t *) {
+  walkElapsedMs += kWalkTickMs;
 
-  // The steps need their own timer rather than a delayed animation:
-  // lv_anim_start() deletes any existing animation with the same
-  // var+exec_cb, so starting the walk now would cancel the very stretch
-  // it is meant to follow (both drive postureExecCb).
-  if (postureWalkTimer != nullptr) lv_timer_del(postureWalkTimer);
-  postureWalkTimer = lv_timer_create(postureWalkCb, 2000, nullptr);
-  lv_timer_set_repeat_count(postureWalkTimer, 1);
-}
+  constexpr uint32_t kWalkMs = kWalkLapMs * kWalkLaps;
+  constexpr uint32_t kTotalMs = kWalkRiseMs + kWalkMs + kWalkSettleMs;
 
-void startPostureRoutine() {
-  if (postureTimer != nullptr) return;
-  postureTimer = lv_timer_create(postureRoutineCb, 7000, nullptr);
-  postureRoutineCb(nullptr);
-}
-
-void stopPostureRoutine() {
-  if (postureTimer != nullptr) {
-    lv_timer_del(postureTimer);
-    postureTimer = nullptr;
+  if (walkElapsedMs >= kTotalMs) {
+    // Deleting the timer we are running in is safe here: this is not the
+    // repeat_count=0 auto-free case, so LVGL has not already freed it.
+    lv_timer_del(movementWalkTimer);
+    movementWalkTimer = nullptr;
+    walkSetPose(0, 0, 0, 0);
+    return;
   }
-  if (postureWalkTimer != nullptr) {
-    // Still pending, so we own it (unlike from inside its own callback).
-    lv_timer_del(postureWalkTimer);
-    postureWalkTimer = nullptr;
+
+  // Stand up: pushes up out of the chair and turns to set off, slowest at
+  // the top. Ends on exactly the pose the walk starts from.
+  if (walkElapsedMs < kWalkRiseMs) {
+    float t = static_cast<float>(walkElapsedMs) / kWalkRiseMs;
+    float e = 1.0f - (1.0f - t) * (1.0f - t);  // ease-out quad
+    walkSetPose(0, -kWalkLiftY * e, 0, -kWalkYaw * e);
+    return;
   }
-  lv_anim_del(&ch, postureExecCb);
+
+  uint32_t w = walkElapsedMs - kWalkRiseMs;
+  if (w < kWalkMs) {
+    // Starts half a turn in, at the top of the ellipse: that is where the
+    // rise left the face, so the two phases join without a jump.
+    float phi = kWalkPi + 2.0f * kWalkPi * (static_cast<float>(w) / kWalkLapMs);
+    float depth = cosf(phi);  // +1 nearest the viewer, -1 furthest away
+    float step = (phi - kWalkPi) * kWalkStepPairsPerLap;
+
+    float x = kWalkRadiusX * sinf(phi);
+    // Further away reads as higher up the visor. The bounce is |sin| so
+    // both feet push off, rather than one foot and one hop.
+    float y = -kWalkLiftY * (1.0f - depth) * 0.5f - kWalkStepPx * fabsf(sinf(step));
+    // Tips onto each foot in turn -- half the bounce's rate, so the head
+    // rolls once per pair of steps.
+    float tilt = kWalkWaddleTenths * sinf(step);
+    // dx/dphi is proportional to depth, so this IS the direction of
+    // travel: facing left down the near side, right coming back up.
+    walkSetPose(x, y, tilt, kWalkYaw * depth);
+    return;
+  }
+
+  // Sits back down and turns to face you again.
+  float t = static_cast<float>(walkElapsedMs - kWalkRiseMs - kWalkMs) / kWalkSettleMs;
+  if (t > 1.0f) t = 1.0f;
+  float k = (1.0f - t) * (1.0f - t);  // ease-out quad, unwound
+  walkSetPose(0, -kWalkLiftY * k, 0, -kWalkYaw * k);
+}
+
+void movementRoutineCb(lv_timer_t *) {
+  walkElapsedMs = 0;
+  if (movementWalkTimer == nullptr) {
+    movementWalkTimer = lv_timer_create(movementWalkTickCb, kWalkTickMs, nullptr);
+  }
+  // The effort of getting up: eyes widen, mouth opens on the push. These
+  // stay lv_anims rather than joining the tick because they are not part
+  // of the walk -- they relax again while it is still going.
+  playEyeScale(1260, 380, 620, kWalkRiseMs);
+  playChannelOutAndBack(mouthOpenExecCb, 520, 380, 620, kWalkRiseMs);
+}
+
+void startMovementRoutine() {
+  if (movementTimer != nullptr) return;
+  // One routine is ~8.75s, so a 20s reminder gets two of them with a beat
+  // in between rather than a third that would be cut off mid-lap.
+  movementTimer = lv_timer_create(movementRoutineCb, 9600, nullptr);
+  movementRoutineCb(nullptr);
+}
+
+void stopMovementRoutine() {
+  if (movementTimer != nullptr) {
+    lv_timer_del(movementTimer);
+    movementTimer = nullptr;
+  }
+  if (movementWalkTimer != nullptr) {
+    lv_timer_del(movementWalkTimer);
+    movementWalkTimer = nullptr;
+  }
   lv_anim_del(&ch, squintLExecCb);
   lv_anim_del(&ch, squintRExecCb);
   lv_anim_del(&ch, mouthOpenExecCb);
+  ch.faceOffX = 0;
   ch.faceOffY = 0;
+  ch.tiltTenths = 0;
+  ch.headYaw = 0;
   ch.squintL = 1.0f;
   ch.squintR = 1.0f;
   ch.mouthOpen = 0;
@@ -2114,7 +2201,7 @@ void stopPostureRoutine() {
 
 // --- Weather ambient overlays (rain / sunglasses / shiver) ---
 // Lower priority than mood overlays: suppressed while a transient one
-// (glitch/hydration/posture) is showing, resumes once it clears.
+// (glitch/hydration/movement) is showing, resumes once it clears.
 constexpr int kRainStreakCount = 5;
 lv_obj_t *rainStreaks[kRainStreakCount];
 lv_timer_t *rainTimer = nullptr;
@@ -2147,9 +2234,14 @@ constexpr uint32_t kShadesInMs = 380;
 // before it registered.
 constexpr uint32_t kShadesHoldMs = 7000;
 constexpr uint32_t kShadesOutMs = 320;
+// Used when something cuts a cameo short rather than letting it play out.
+// Slightly quicker than the natural lift: the face is being handed to
+// something else, so the glasses should get out of the way, not saunter.
+constexpr uint32_t kShadesRetractMs = 260;
 
 lv_timer_t *shadesCameoTimer = nullptr;  // recurring: schedules cameos
 lv_timer_t *shadesHideTimer = nullptr;   // one-shot: ends the current cameo
+bool shadesRetracting = false;           // cut short, currently lifting away
 
 void shadesDropExecCb(void *, int32_t v) {
   ch.shadesDropY = static_cast<float>(v);
@@ -2181,9 +2273,58 @@ void endShadesCameo() {
 
 void shadesHideCb(lv_timer_t *) { endShadesCameo(); }
 
+void shadesRetractDoneCb(lv_anim_t *) {
+  shadesRetracting = false;
+  endShadesCameo();
+}
+
+// Take the glasses off *now*, but on screen rather than by deletion.
+//
+// Every path that cancels a cameo early used to call setShadesHidden(true)
+// directly, so the glasses blinked out of existence mid-wear. The one that
+// actually bites is refreshWeatherEffect(): a transient overlay (glitch,
+// hydration, movement) flips weatherSuppressed and tears the weather
+// effects down, and if that lands inside the 7s hold the glasses simply
+// vanish. They now lift away the same way they arrived.
+void retractShades(uint32_t ms) {
+  if (!sunglassesVisible) {
+    // Nothing on the face; just make sure no stale drop animation is left
+    // to write the channel after we have zeroed it.
+    lv_anim_del(&ch, shadesDropExecCb);
+    shadesRetracting = false;
+    ch.shadesDropY = 0;
+    return;
+  }
+
+  // Already off the top of the visor (cut short during the drop-in), so
+  // there is nothing left to watch -- finish immediately.
+  if (ch.shadesDropY <= static_cast<float>(kShadesDropFrom) + 1.0f) {
+    lv_anim_del(&ch, shadesDropExecCb);
+    shadesRetracting = false;
+    endShadesCameo();
+    return;
+  }
+
+  shadesRetracting = true;
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, &ch);
+  // Same var+exec_cb pair as the cameo animation, so lv_anim_start()
+  // cancels that one for us. lv_anim_del() fires deleted_cb, never
+  // ready_cb, so the cameo's playback cannot hide us behind our back.
+  lv_anim_set_exec_cb(&a, shadesDropExecCb);
+  lv_anim_set_values(&a, static_cast<int32_t>(ch.shadesDropY), kShadesDropFrom);
+  lv_anim_set_time(&a, ms);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in);  // peels off, gathering speed
+  lv_anim_set_ready_cb(&a, shadesRetractDoneCb);
+  lv_anim_start(&a);
+}
+
 void playShadesCameo() {
   if (cameosSuppressed) return;
   if (shadesHideTimer != nullptr) return;  // already wearing them
+  if (shadesRetracting) return;            // last pair still on its way out
   // Only one piece of scenery at a time. playRainCameo() holds the
   // mirror-image guard, so whichever fires first keeps the stage.
   if (rainCameoActive) return;
@@ -2230,10 +2371,9 @@ void stopWeatherEffects() {
     lv_timer_del(shadesHideTimer);
     shadesHideTimer = nullptr;
   }
-  lv_anim_del(&ch, shadesDropExecCb);
-  sunglassesVisible = false;
-  setShadesHidden(true);
-  ch.shadesDropY = 0;
+  // Animated, not snapped: this runs whenever a transient overlay
+  // suppresses the weather effects, which is usually mid-cameo.
+  retractShades(kShadesRetractMs);
   if (shiverTimer != nullptr) {
     lv_timer_del(shiverTimer);
     shiverTimer = nullptr;
@@ -2289,13 +2429,11 @@ void restartWhistleMotion() {
   lv_anim_start(&sway);
 
   // Vertical bob at roughly twice the sway rate, so it reads as nodding
-  // along rather than just leaning. Uses postureExecCb because that is
-  // already the faceOffY writer -- a second callback on the same channel
-  // would not replace it, it would fight it.
+  // along rather than just leaning.
   lv_anim_t bob;
   lv_anim_init(&bob);
   lv_anim_set_var(&bob, &ch);
-  lv_anim_set_exec_cb(&bob, postureExecCb);
+  lv_anim_set_exec_cb(&bob, faceOffYExecCb);
   lv_anim_set_values(&bob, 0, -kWhistleBobPx);
   lv_anim_set_time(&bob, 410);
   lv_anim_set_playback_time(&bob, 430);
@@ -2343,7 +2481,7 @@ void stopWhistling() {
   }
   lv_anim_del(&ch, gapeScaleExecCb);
   lv_anim_del(&ch, tiltExecCb);
-  lv_anim_del(&ch, postureExecCb);
+  lv_anim_del(&ch, faceOffYExecCb);
   ch.gapeScale = 0;
   ch.tiltTenths = 0;
   ch.faceOffY = 0;
@@ -2975,7 +3113,7 @@ void applyMoodState(MoodEngine::State state) {
   bool wantSnore = false;
   bool wantYawns = false;
   bool wantSips = false;
-  bool wantStretch = false;
+  bool wantWalk = false;
   // Sustained states own the face outright -- idle blink/look/pout/squint/
   // tilt would otherwise fight the sustained pose for the same objects.
   // Dialled down rather than switched off: asleep still breathes, a held
@@ -3053,11 +3191,12 @@ void applyMoodState(MoodEngine::State state) {
       wantSips = true;
       level = IdleLevel::REDUCED;  // holds the gaze on the bottle, but keeps blinking
       break;
-    case MoodEngine::State::POSTURE_REMINDER:
+    case MoodEngine::State::MOVEMENT_REMINDER:
       // A 20s reminder is long enough to own the face, so unlike GLITCHED
       // this does get a pose. REDUCED keeps it blinking while stopping the
-      // idle flourishes from fighting the stretch for the same channels.
-      wantStretch = true;
+      // idle flourishes from reaching for the same four channels the walk
+      // is driving.
+      wantWalk = true;
       level = IdleLevel::REDUCED;
       break;
     default:
@@ -3068,11 +3207,11 @@ void applyMoodState(MoodEngine::State state) {
   // pose of its own -- it lands in `default:` above with every pose value
   // at its neutral, and applying that would animate the entire mood pose
   // out and back for the sake of 200-800ms. So the pose block is skipped
-  // for it and the mood underneath keeps holding the face. POSTURE lasts
-  // 20s and does get its own pose, but still suppresses weather.
+  // for it and the mood underneath keeps holding the face. MOVEMENT
+  // lasts 20s and does get its own pose, but still suppresses weather.
   bool isPoseless = state == MoodEngine::State::GLITCHED;
   bool isTransientOverlay =
-      isPoseless || state == MoodEngine::State::POSTURE_REMINDER;
+      isPoseless || state == MoodEngine::State::MOVEMENT_REMINDER;
 
   // Recorded on EVERY call, not just when the state changes, so it is
   // always current for an expression to restore. Skipped for poseless
@@ -3133,10 +3272,10 @@ void applyMoodState(MoodEngine::State state) {
     } else {
       stopHydrationRoutine();
     }
-    if (wantStretch) {
-      startPostureRoutine();
+    if (wantWalk) {
+      startMovementRoutine();
     } else {
-      stopPostureRoutine();
+      stopMovementRoutine();
     }
 
 
@@ -3146,7 +3285,7 @@ void applyMoodState(MoodEngine::State state) {
   }
 
   // Weather is suppressed for the duration of a transient overlay
-  // (glitch/posture) so it doesn't visually compete with it.
+  // (glitch/movement) so it doesn't visually compete with it.
   if (isTransientOverlay != weatherSuppressed) {
     weatherSuppressed = isTransientOverlay;
     refreshWeatherEffect();
@@ -3253,16 +3392,15 @@ void triggerExpression(const char *expression) {
   } else if (strcmp(expression, "glitch") == 0) {
     playGlitchEffect();
     return;  // glitch clears itself via its own timer, not the shared one below
-  } else if (strcmp(expression, "posture") == 0) {
-    // One complete cycle of the real reminder: stretch, then the footstep
-    // bobs two seconds later. Matches how `hydrate` gives you one sip
-    // rather than the whole 20s reminder.
+  } else if (strcmp(expression, "movement") == 0) {
+    // One complete cycle of the real reminder -- stand, two laps, sit --
+    // the way `hydrate` gives you one sip rather than the whole 20s
+    // reminder.
     //
-    // Returns early like whistle and glitch: postureRoutineCb's animations
-    // all terminate on their own and outlast the 2.5s expression hold, so
-    // routing it through the shared expression timer would cut the walk
-    // off halfway.
-    postureRoutineCb(nullptr);
+    // Returns early like whistle and glitch: the routine is ~8.75s and
+    // ends itself, so routing it through the shared 2.5s expression timer
+    // would cut the walk off on its first lap.
+    movementRoutineCb(nullptr);
     return;
   } else if (strcmp(expression, "hydrate") == 0) {
     animateExpressionTo(kEyeHeight, kMouthAngleStart, kMouthAngleEnd, kHydrationDriftX);

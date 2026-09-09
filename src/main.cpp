@@ -31,7 +31,7 @@ const char *stateName(MoodEngine::State s) {
     case MoodEngine::State::NEUTRAL: return "NEUTRAL";
     case MoodEngine::State::GLITCHED: return "GLITCHED";
     case MoodEngine::State::HYDRATION_REMINDER: return "HYDRATION_REMINDER";
-    case MoodEngine::State::POSTURE_REMINDER: return "POSTURE_REMINDER";
+    case MoodEngine::State::MOVEMENT_REMINDER: return "MOVEMENT_REMINDER";
   }
   return "?";
 }

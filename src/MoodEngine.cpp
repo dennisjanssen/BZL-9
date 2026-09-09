@@ -12,12 +12,12 @@ namespace {
 State baseState = State::NEUTRAL;
 bool lastTimeKnown = false;
 
-enum class Overlay { NONE, GLITCHED, HYDRATION, POSTURE };
+enum class Overlay { NONE, GLITCHED, HYDRATION, MOVEMENT };
 Overlay overlay = Overlay::NONE;
 uint32_t overlayEndMs = 0;
 
 uint32_t hydrationElapsedMs = 0;
-uint32_t postureElapsedMs = 0;
+uint32_t movementElapsedMs = 0;
 
 // --- Random day mood ---
 // ASSUMPTION: the user asked for moods held "for a few minutes on end"
@@ -96,7 +96,7 @@ void tickDayMood(bool awake) {
 }
 
 // ASSUMPTION: the brief specifies glitch's on-screen duration (200-800ms,
-// DisplayEngine section) but not how long a hydration/posture reminder
+// DisplayEngine section) but not how long a hydration/movement reminder
 // stays up. 20s felt long enough to notice and read, short enough not to
 // dominate. Not exposed via ConfigStore -- the brief only names the
 // interval *between* reminders as a portal-configurable field, not this.
@@ -106,7 +106,7 @@ State overlayToState(Overlay o) {
   switch (o) {
     case Overlay::GLITCHED: return State::GLITCHED;
     case Overlay::HYDRATION: return State::HYDRATION_REMINDER;
-    case Overlay::POSTURE: return State::POSTURE_REMINDER;
+    case Overlay::MOVEMENT: return State::MOVEMENT_REMINDER;
     default: return State::NEUTRAL;  // unreachable when o != NONE
   }
 }
@@ -162,14 +162,14 @@ void maybeStartOverlay(const TimeInput &time) {
   const auto &cfg = ConfigStore::get();
 
   // Priority when multiple are due in the same tick (ASSUMPTION, brief
-  // asks this be defined explicitly): POSTURE > HYDRATION > GLITCHED.
+  // asks this be defined explicitly): MOVEMENT > HYDRATION > GLITCHED.
   // Health-nudge reminders matter more than a cosmetic glitch, and a
   // missed reminder simply fires on the very next tick once the other
   // overlay clears -- neither one is dropped.
-  if (postureElapsedMs >= static_cast<uint32_t>(cfg.postureIntervalMinutes) * 60000UL) {
-    overlay = Overlay::POSTURE;
+  if (movementElapsedMs >= static_cast<uint32_t>(cfg.movementIntervalMinutes) * 60000UL) {
+    overlay = Overlay::MOVEMENT;
     overlayEndMs = millis() + kReminderDurationMs;
-    postureElapsedMs = 0;
+    movementElapsedMs = 0;
     return;
   }
   if (hydrationElapsedMs >= static_cast<uint32_t>(cfg.hydrationIntervalMinutes) * 60000UL) {
@@ -199,7 +199,7 @@ void init() {
   overlay = Overlay::NONE;
   lastTimeKnown = false;
   hydrationElapsedMs = 0;
-  postureElapsedMs = 0;
+  movementElapsedMs = 0;
   dayMood = State::NEUTRAL;
   moodRemainingMs = 0;
   moodOverride = false;
@@ -210,7 +210,7 @@ void update(const TimeInput &time) {
 
   if (baseState != State::SLEEPING && baseState != State::SLEEPY) {
     hydrationElapsedMs += 1000;
-    postureElapsedMs += 1000;
+    movementElapsedMs += 1000;
   }
 
   State sched = computeScheduleState(time);

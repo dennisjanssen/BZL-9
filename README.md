@@ -114,7 +114,7 @@ hooks below, or the dashboard) you know the face is reacting to that and not jus
 idling. A signal you cannot tell apart from ordinary behaviour is not a signal.
 While `focused` is held, the weather cameos and random glitches are suppressed
 for the same reason: sunglasses dropping onto the face mid-task would undo it.
-Hydration and posture reminders still fire — those are for you, not decoration.
+Hydration and movement reminders still fire — those are for you, not decoration.
 
 You can pin a mood from the dashboard, or leave it on **Auto**. A pinned mood is
 dropped overnight so a forgotten one does not outlive the day.
@@ -125,7 +125,8 @@ eyes shut, and a snore — the face rises as the mouth falls open and a bubble
 inflates from it, then pops. Brightness fades to the sleep level.
 
 **Reminders** — on their own intervals, it drinks from a blue water bottle that
-visibly empties over four sips, and does a stretch-then-walk routine for posture.
+visibly empties over four sips, and for the movement reminder it gets up
+and walks a couple of laps around the visor.
 
 **Weather** — fetched from [Open-Meteo](https://open-meteo.com/) (no API key).
 Sunglasses drop onto its face when it is clear, it shivers when it snows, rain
@@ -134,8 +135,9 @@ drifts in and it recoils from it, wide-eyed.
 
 **Expressions** — one-shot reactions from the dashboard: `shock`, `heart`, `rage`,
 `sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`, `wave`, `whistle`,
-`posture`. `hydrate` and `posture` each run one cycle of the corresponding
-reminder, so you can see them without waiting for the interval.
+`movement`. `hydrate` and `movement` each run one cycle of the
+corresponding reminder, so you can see them without waiting for the
+interval.
 
 `wave` raises a small hand beside the face and waves it — meant for "I need you"
 rather than the alarm that `shock` conveys. `whistle` purses the mouth into a
@@ -280,7 +282,7 @@ rejected with HTTP 400 rather than silently clamped.
 | Timezone | `CET-1CEST,M3.5.0,M10.5.0/3` | POSIX TZ |
 | Sleepy before end | 60 min | 5–240 |
 | Hydration reminder | 60 min | 5–480 |
-| Posture reminder | 45 min | 5–480 |
+| Movement reminder | 45 min | 5–480 |
 | Latitude / longitude | 50.8503 / 4.3517 | ±90 / ±180 |
 | Weather poll | 15 min | 5–180 |
 | Active brightness | 50% | 1–50 |
@@ -307,8 +309,8 @@ rejected with HTTP 400 rather than silently clamped.
 until changed, and is dropped overnight.
 
 `POST /api/express` accepts `shock`, `heart`, `rage`, `sleepy`, `glitch`,
-`hydrate`, `unimpressed`, `grin`, `wave`, `whistle` and `posture`. These are
-one-shot and release themselves.
+`hydrate`, `unimpressed`, `grin`, `wave`, `whistle` and `movement`. These
+are one-shot and release themselves.
 
 Both take `Content-Type: application/json`, reject anything outside those lists
 with HTTP 400, and hold no state in flash — safe to call as often as you like.

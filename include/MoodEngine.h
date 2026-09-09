@@ -33,7 +33,7 @@ enum class State {
   // --- Transient overlays (priority over the above) ---
   GLITCHED,
   HYDRATION_REMINDER,
-  POSTURE_REMINDER,
+  MOVEMENT_REMINDER,
 };
 
 struct TimeInput {

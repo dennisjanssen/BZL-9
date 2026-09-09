@@ -81,7 +81,7 @@ async function loadConfig() {
     document.getElementById("c-workday-end").value = minutesToTime(c.workdayEndMinutes);
     document.getElementById("c-timezone").value = c.timezone;
     document.getElementById("c-hydration").value = c.hydrationIntervalMinutes;
-    document.getElementById("c-posture").value = c.postureIntervalMinutes;
+    document.getElementById("c-movement").value = c.movementIntervalMinutes;
     document.getElementById("c-sleepy-lead").value = c.sleepyLeadMinutes;
     document.getElementById("c-lat").value = c.latitude;
     document.getElementById("c-lon").value = c.longitude;
@@ -123,7 +123,7 @@ document.getElementById("config-form").addEventListener("submit", async (e) => {
     workdayEndMinutes: timeToMinutes(document.getElementById("c-workday-end").value),
     timezone: document.getElementById("c-timezone").value,
     hydrationIntervalMinutes: Number(document.getElementById("c-hydration").value),
-    postureIntervalMinutes: Number(document.getElementById("c-posture").value),
+    movementIntervalMinutes: Number(document.getElementById("c-movement").value),
     sleepyLeadMinutes: Number(document.getElementById("c-sleepy-lead").value),
     latitude: Number(document.getElementById("c-lat").value),
     longitude: Number(document.getElementById("c-lon").value),

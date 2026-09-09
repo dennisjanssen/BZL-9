@@ -25,7 +25,7 @@ struct Config {
 
   // --- Reminders ---
   uint16_t hydrationIntervalMinutes = 60;  // Range 5-480.
-  uint16_t postureIntervalMinutes = 45;    // Range 5-480.
+  uint16_t movementIntervalMinutes = 45;   // Range 5-480.
 
   // How long before the end of the workday the face starts getting
   // sleepy. Range 5-240. Default 60 -- the user asked for "the hour
@@ -103,7 +103,7 @@ bool setWorkdayStartMinutes(uint16_t v);
 bool setWorkdayEndMinutes(uint16_t v);
 bool setTimezone(const char *v);
 bool setHydrationIntervalMinutes(uint16_t v);
-bool setPostureIntervalMinutes(uint16_t v);
+bool setMovementIntervalMinutes(uint16_t v);
 bool setSleepyLeadMinutes(uint16_t v);
 bool setLatitude(float v);
 bool setLongitude(float v);

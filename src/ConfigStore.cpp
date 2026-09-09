@@ -45,7 +45,11 @@ void loadAll() {
   }
 
   current.hydrationIntervalMinutes = prefs.getUShort("hydroInt", 60);
-  current.postureIntervalMinutes = prefs.getUShort("postureInt", 45);
+  // Falls back to the pre-rename key so a device that was already
+  // running keeps whatever interval it was configured with; the first
+  // write through setMovementIntervalMinutes() moves it to "moveInt".
+  current.movementIntervalMinutes =
+      prefs.getUShort("moveInt", prefs.getUShort("postureInt", 45));
 
   current.latitude = prefs.getFloat("lat", 50.8503f);
   current.longitude = prefs.getFloat("lon", 4.3517f);
@@ -166,11 +170,11 @@ bool setHydrationIntervalMinutes(uint16_t v) {
   return true;
 }
 
-bool setPostureIntervalMinutes(uint16_t v) {
+bool setMovementIntervalMinutes(uint16_t v) {
   if (v < 5 || v > 480) return false;
   LockGuard lock;
-  current.postureIntervalMinutes = v;
-  prefs.putUShort("postureInt", v);
+  current.movementIntervalMinutes = v;
+  prefs.putUShort("moveInt", v);
   return true;
 }
 
