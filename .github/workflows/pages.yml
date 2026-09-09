@@ -1,0 +1,112 @@
+# Builds the firmware and publishes the browser installer to GitHub Pages.
+#
+# The binaries are deliberately NOT committed to the repository -- they are
+# ~2MB per build and would bloat history within a few releases. They are
+# built here and copied into the published site instead, which also means
+# the page can never offer a binary that does not match the source beside
+# it.
+#
+# Requires Settings > Pages > Source to be set to "GitHub Actions". With
+# "Deploy from a branch" pointed at /docs the page would publish but the
+# .bin files would 404, because they only ever exist here.
+name: Installer page
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; do not cancel one that is mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe needs the tags
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The pinned pioarduino platform plus the RISC-V toolchain is a
+      # several-hundred-megabyte download. Without this every run fetches
+      # the lot again.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - run: pip install --upgrade platformio
+
+      - name: Build firmware and filesystem
+        run: |
+          pio run -e esp32-c6-bzl9
+          pio run -e esp32-c6-bzl9 -t buildfs
+
+      - name: Assemble the site
+        run: |
+          set -eu
+          VERSION="$(git describe --tags --always)"
+          BUILD=.pio/build/esp32-c6-bzl9
+          mkdir -p site
+
+          # firmware.factory.bin already merges bootloader (0x0), partition
+          # table (0x8000), boot_app0 (0xe000) and the app (0x10000) into
+          # one contiguous image starting at zero, so the manifest needs
+          # only two parts. littlefs.bin carries the web dashboard and is
+          # NOT part of that merge -- without it the device boots and
+          # serves nothing.
+          cp "$BUILD/firmware.factory.bin" site/
+          cp "$BUILD/littlefs.bin" site/
+
+          # The version is the one field that cannot be written by hand:
+          # it has to name what was actually built.
+          sed "s/__VERSION__/${VERSION}/" docs/manifest.json > site/manifest.json
+          sed "s/__VERSION__/${VERSION}/" docs/index.html   > site/index.html
+
+          echo "Published $VERSION"
+          ls -l site
+
+      - name: Check the manifest offset against partitions.csv
+        run: |
+          set -eu
+          # A wrong filesystem offset flashes cleanly and leaves a device
+          # with no dashboard -- exactly the failure nobody notices until a
+          # stranger reports it. Cheap to catch here.
+          #
+          # $(( )) rather than awk's strtonum(): that is a gawk builtin and
+          # the runner's default awk may be mawk, which does not have it.
+          HEX="$(grep '^littlefs,' partitions.csv | cut -d',' -f4 | tr -d ' ')"
+          WANT=$(( HEX ))
+          GOT="$(grep 'littlefs.bin' site/manifest.json | grep -o '[0-9]\+')"
+          echo "partitions.csv says $WANT ($HEX), manifest says $GOT"
+          test "$WANT" = "$GOT"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

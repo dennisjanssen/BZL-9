@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install BZL-9</title>
+<meta name="description" content="Flash the BZL-9 desk companion firmware to an ESP32-C6 straight from your browser.">
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #f4f4f2;
+  --card: #ffffff;
+  --border: #ddd;
+  --accent: #3a6ea5;
+  --muted: #666;
+  --visor: #101114;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #eee;
+    --bg: #17181a;
+    --card: #232427;
+    --border: #3a3b3e;
+    --accent: #7aa7d9;
+    --muted: #aaa;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.55;
+}
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+.visor {
+  display: block;
+  width: 100%;
+  max-width: 20rem;
+  margin: 0 auto 1.75rem;
+  background: var(--visor);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.35rem; text-align: center; }
+.tagline { margin: 0 0 2rem; text-align: center; color: var(--muted); }
+.install { text-align: center; margin: 0 0 0.75rem; }
+button.cta {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.7rem 1.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button.cta:hover { filter: brightness(1.08); }
+.note {
+  display: block;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+.build {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 2.5rem;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin: 0 0 1rem;
+}
+h2 { font-size: 1rem; margin: 0 0 0.6rem; }
+ol, ul { margin: 0; padding-left: 1.2rem; }
+li + li { margin-top: 0.35rem; }
+code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  font-size: 0.9em;
+}
+a { color: var(--accent); }
+footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- The real face, same geometry as the firmware draws: two 40x54 pill
+       eyes 62px either side of centre, and a 30px-radius mouth arc from
+       44 to 136 degrees. Drawn from primitives here too -- no assets. -->
+  <svg class="visor" viewBox="0 0 320 172" role="img" aria-label="The BZL-9 face: two rounded white eyes above a small smile">
+    <rect x="78" y="33" width="40" height="54" rx="20" fill="#fff"/>
+    <rect x="202" y="33" width="40" height="54" rx="20" fill="#fff"/>
+    <path d="M 181.6 122.8 A 30 30 0 0 1 138.4 122.8"
+          fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  </svg>
+
+  <h1>Install BZL-9</h1>
+  <p class="tagline">Flash the desk companion firmware to your ESP32-C6, straight from this page.</p>
+
+  <div class="install">
+    <esp-web-install-button manifest="manifest.json">
+      <button class="cta" slot="activate">Connect and install</button>
+      <span class="note" slot="unsupported">
+        Your browser cannot talk to serial devices. Use Chrome or Edge on a
+        desktop &mdash; this does not work on iOS, and Android is unsupported.
+      </span>
+      <span class="note" slot="not-allowed">
+        This page has to be served over HTTPS for the browser to allow
+        serial access.
+      </span>
+    </esp-web-install-button>
+  </div>
+  <p class="build">Build <code>__VERSION__</code></p>
+
+  <section class="card">
+    <h2>What you need</h2>
+    <ul>
+      <li>A <strong>Waveshare ESP32-C6-LCD-1.47</strong> (or a clone of that reference design).</li>
+      <li>A USB-C cable that carries data, not just power.</li>
+      <li>Chrome or Edge on a desktop.</li>
+    </ul>
+    <p>No drivers. The ESP32-C6 has a built-in USB-Serial-JTAG peripheral rather
+    than a separate bridge chip, so the board appears on its own once plugged in.</p>
+  </section>
+
+  <section class="card">
+    <h2>Then set it up</h2>
+    <ol>
+      <li>When flashing finishes, the device restarts and shows its face.</li>
+      <li>With no Wi-Fi credentials stored it starts its own access point,
+        <code>BZL-9-Companion</code> &mdash; open, no password.</li>
+      <li>Join it and open <a href="http://192.168.4.1">192.168.4.1</a>. Any
+        unmatched URL redirects there, so most phones offer the page on their
+        own. Enter your Wi-Fi details, your latitude and longitude, and your
+        workday hours, then save.</li>
+      <li>It reboots onto your network and is then reachable at
+        <a href="http://bzl9.local">bzl9.local</a>, where everything else is configured.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>What gets written</h2>
+    <p>Two images: the firmware (bootloader, partition table and application) and
+    a small filesystem holding the web dashboard. Both are needed &mdash; without
+    the second the device boots but serves no pages.</p>
+    <p>The installer offers to erase the device first. Say <strong>yes</strong> on a
+    new board. Erasing also clears saved Wi-Fi credentials and settings, so if you
+    are re-flashing one you have already set up and want to keep those, decline it.</p>
+    <p>Later updates can go over the air from the dashboard instead, at
+    <code>/update</code>.</p>
+  </section>
+
+  <footer>
+    <a href="https://github.com/dennisjanssen/BZL-9">Source, schematics and full documentation on GitHub</a>
+  </footer>
+
+</main>
+
+<script type="module"
+        src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</body>
+</html>

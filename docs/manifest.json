@@ -1,0 +1,16 @@
+{
+  "name": "BZL-9",
+  "version": "__VERSION__",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C6",
+      "serialType": "cdc",
+      "parts": [
+        { "path": "firmware.factory.bin", "offset": 0 },
+        { "path": "littlefs.bin", "offset": 3997696 }
+      ]
+    }
+  ]
+}

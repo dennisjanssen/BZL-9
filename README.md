@@ -12,6 +12,10 @@ The face is drawn entirely from primitives at runtime — there are no image ass
 
 Source and issues: <https://github.com/dennisjanssen/BZL-9>
 
+**[Install it from your browser →](https://dennisjanssen.github.io/BZL-9/)**
+No toolchain, no drivers — Chrome or Edge on a desktop, and a USB cable.
+Building from source is below if you would rather.
+
 ---
 
 ## Hardware
@@ -57,6 +61,39 @@ pinned libraries require.
 git clone https://github.com/dennisjanssen/BZL-9.git && cd BZL-9
 pio run -e esp32-c6-bzl9
 ```
+
+### The browser installer
+
+<https://dennisjanssen.github.io/BZL-9/> flashes a board over Web Serial with
+no toolchain. It is built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+from `docs/`, and the binaries are **not** committed — CI builds them on every
+push to `main` and copies them into the published site, so the page can never
+offer an image that does not match the source beside it.
+
+The manifest describes two parts:
+
+| | offset |
+|---|---|
+| `firmware.factory.bin` | `0x0` |
+| `littlefs.bin` | `0x3D0000` |
+
+`firmware.factory.bin` already merges the bootloader, partition table,
+`boot_app0` and the app into one contiguous image from zero, which is why the
+first three are not listed separately. The filesystem is **not** in that merge,
+and a device flashed without it boots normally and serves no dashboard — so the
+workflow asserts the manifest's offset still matches `partitions.csv` before it
+publishes.
+
+To host your own fork's copy: **Settings → Pages → Source → GitHub Actions**.
+That must be set *before* the first workflow run, or `deploy-pages` fails.
+Do not choose "Deploy from a branch" pointed at `/docs`; the page would publish
+but the `.bin` files would 404, because they only exist inside the workflow.
+Also update the two `dennisjanssen.github.io` URLs above and the GitHub link in
+`docs/index.html`.
+
+The installer is for the **first** flash. Once the device is on your network,
+`/update` is the upgrade path. It is also the only way onto the current
+partition layout from a build older than 2026-09-09, which OTA cannot reach.
 
 ### Flashing
 
