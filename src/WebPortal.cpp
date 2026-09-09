@@ -178,6 +178,11 @@ void updateNetworking() {
       } else {
         Serial.println("[WebPortal] mDNS failed to start (the IP still works)");
       }
+      // Same "we just joined a network" moment: fetch the weather now
+      // rather than waiting for the poll task's next retry. On a first
+      // boot this is the transition right after the user has been through
+      // the portal, which is exactly when they are watching.
+      WeatherService::requestRefresh();
     }
     netState = NetState::CONNECTED;
     consecutiveFailures = 0;
@@ -231,6 +236,11 @@ void applyCommand(const Command &cmd) {
       if (c.hasLatitude) ConfigStore::setLatitude(c.latitude);
       if (c.hasLongitude) ConfigStore::setLongitude(c.longitude);
       if (c.hasWeatherPollInterval) ConfigStore::setWeatherPollIntervalMinutes(c.weatherPollInterval);
+      // Otherwise a corrected location -- the first thing anyone fixes
+      // after setup -- would not show until the current interval ran out.
+      if (c.hasLatitude || c.hasLongitude || c.hasWeatherPollInterval) {
+        WeatherService::requestRefresh();
+      }
       if (c.hasActiveBrightness) {
         ConfigStore::setActiveBrightnessPercent(c.activeBrightness);
         DisplayEngine::setBrightnessPercent(c.activeBrightness);

@@ -16,11 +16,29 @@ namespace WeatherService {
 namespace {
 
 SemaphoreHandle_t mutex = nullptr;
+TaskHandle_t taskHandle = nullptr;
 Reading snapshot;
 uint32_t lastSuccessMs = 0;
 bool everSucceeded = false;
 
 constexpr uint32_t kStaleAfterMs = 3600000UL;  // 1 hour, per the brief
+
+// The configured poll interval applies only AFTER a fetch that actually
+// worked. It used to be the delay after every pass, including passes that
+// fetched nothing -- and since this task is started immediately after the
+// non-blocking Wi-Fi connect begins, its first pass always runs before the
+// association completes. That meant a device with a default 15 minute
+// interval showed no weather for 15 minutes after every boot, and longer
+// on a first-ever boot, where Wi-Fi is not configured until the user has
+// been through the portal.
+//
+// Not connected yet: only a WiFi.status() check, no traffic at all, so
+// this can be cheap and frequent.
+constexpr uint32_t kNotConnectedRetryMs = 2000;
+// Connected but the fetch failed: back off, so a lasting failure (DNS,
+// captive portal, the API down) does not hammer Open-Meteo for hours.
+constexpr uint32_t kFailRetryMinMs = 15000;
+constexpr uint32_t kFailRetryMaxMs = 300000;
 
 // ASSUMPTION: the brief names three overlays (rain, sunglasses, shiver)
 // and says to map WMO codes to them "with an explicit switch", but doesn't
@@ -156,9 +174,14 @@ bool fetchOnce() {
 }
 
 void task(void *) {
+  uint32_t failRetryMs = kFailRetryMinMs;
+
   for (;;) {
-    if (WiFi.status() == WL_CONNECTED) {
-      if (!fetchOnce() && everSucceeded) {
+    bool connected = WiFi.status() == WL_CONNECTED;
+    bool fetched = false;
+    if (connected) {
+      fetched = fetchOnce();
+      if (!fetched && everSucceeded) {
         // Failure: keep the last reading in place (don't clear
         // `available`), just let the staleness check below catch up.
         Serial.println("[WeatherService] fetch failed, keeping last reading");
@@ -172,9 +195,24 @@ void task(void *) {
       xSemaphoreGive(mutex);
     }
 
-    auto cfg = ConfigStore::get();
-    uint32_t pollMs = static_cast<uint32_t>(cfg.weatherPollIntervalMinutes) * 60000UL;
-    vTaskDelay(pdMS_TO_TICKS(pollMs));
+    uint32_t waitMs;
+    if (fetched) {
+      failRetryMs = kFailRetryMinMs;
+      auto cfg = ConfigStore::get();
+      waitMs = static_cast<uint32_t>(cfg.weatherPollIntervalMinutes) * 60000UL;
+    } else if (!connected) {
+      waitMs = kNotConnectedRetryMs;
+    } else {
+      waitMs = failRetryMs;
+      uint32_t next = failRetryMs * 2;
+      failRetryMs = next > kFailRetryMaxMs ? kFailRetryMaxMs : next;
+    }
+
+    // Returns early when requestRefresh() notifies, so new coordinates or
+    // a fresh connection take effect now rather than at the end of the
+    // interval. pdTRUE clears the count on the way out, so a burst of
+    // requests collapses into the one fetch they all wanted.
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(waitMs));
   }
 }
 
@@ -184,7 +222,11 @@ void begin() {
   mutex = xSemaphoreCreateMutex();
   // Priority 1 (just above idle): weather data is never urgent, and this
   // must not compete with the LVGL/loop task for CPU time.
-  xTaskCreate(task, "weather", 8192, nullptr, 1, nullptr);
+  xTaskCreate(task, "weather", 8192, nullptr, 1, &taskHandle);
+}
+
+void requestRefresh() {
+  if (taskHandle != nullptr) xTaskNotifyGive(taskHandle);
 }
 
 Reading current() {

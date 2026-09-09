@@ -2202,15 +2202,71 @@ void stopMovementRoutine() {
 // --- Weather ambient overlays (rain / sunglasses / shiver) ---
 // Lower priority than mood overlays: suppressed while a transient one
 // (glitch/hydration/movement) is showing, resumes once it clears.
-constexpr int kRainStreakCount = 5;
+// REVISED: this was five streaks at fixed x, all falling 6px per tick in
+// perfect lockstep and wrapping together -- five permanent columns, which
+// reads as a test pattern rather than weather. It also ticked at 50ms
+// against LVGL's 30ms refresh, so it was a slideshow of 6px jumps instead
+// of motion.
+//
+// Now every streak carries its own depth, and one random number per
+// streak drives four things that covary in real rain: a near drop falls
+// faster, is longer, slants further and is brighter; a far one is slow,
+// short and dim. That covariance is what stops a row of identical bars
+// reading as a machine.
+constexpr int kRainStreakCount = 10;
+// Matches LV_DISP_DEF_REFR_PERIOD, so every tick lands on a real frame.
+// THESE TWO are the dial if the face ever stutters during rain: fewer
+// streaks or a longer tick, in that order.
+constexpr uint32_t kRainTickMs = 30;
+
+constexpr float kRainSpeedMin = 2.0f;   // px per tick, ~67 px/s
+constexpr float kRainSpeedMax = 4.4f;   // ~147 px/s
+constexpr float kRainSlant = 0.26f;     // sideways drift as a fraction of fall
+constexpr lv_coord_t kRainLenMin = 9;
+constexpr lv_coord_t kRainLenMax = 22;
+constexpr int kRainOpaMin = 70;         // far: barely there
+constexpr int kRainOpaMax = 180;        // near: present, still not loud
+
 lv_obj_t *rainStreaks[kRainStreakCount];
+float rainStreakX[kRainStreakCount];
+float rainStreakY[kRainStreakCount];
+float rainStreakSpeed[kRainStreakCount];
 lv_timer_t *rainTimer = nullptr;
 
+// `scattered` seeds a streak anywhere on screen, for the first frame of a
+// shower; otherwise it starts above the top edge, ready to fall in.
+void respawnRainStreak(int i, bool scattered) {
+  float t = static_cast<float>(lv_rand(0, 1000)) / 1000.0f;  // 0 far .. 1 near
+  rainStreakSpeed[i] = kRainSpeedMin + (kRainSpeedMax - kRainSpeedMin) * t;
+
+  lv_coord_t len = static_cast<lv_coord_t>(kRainLenMin + (kRainLenMax - kRainLenMin) * t);
+  lv_obj_set_size(rainStreaks[i], t > 0.55f ? 3 : 2, len);
+  lv_obj_set_style_bg_opa(rainStreaks[i],
+                          static_cast<lv_opa_t>(kRainOpaMin + (kRainOpaMax - kRainOpaMin) * t),
+                          LV_PART_MAIN);
+
+  // Spawned from well left of the screen as well as on it: every streak
+  // drifts right as it falls, so without this the right-hand side would
+  // slowly empty out while the left stayed full.
+  // lv_rand takes uint32_t, so the negative minimum is built by
+  // subtracting rather than passed in.
+  rainStreakX[i] = static_cast<float>(lv_rand(0, LCD_WIDTH + 60)) - 60.0f;
+  rainStreakY[i] = scattered ? static_cast<float>(lv_rand(0, LCD_HEIGHT))
+                             : -static_cast<float>(len) - static_cast<float>(lv_rand(0, 60));
+}
+
 void rainTickCb(lv_timer_t *) {
-  for (auto *streak : rainStreaks) {
-    lv_coord_t y = lv_obj_get_y(streak) + 6;
-    if (y > LCD_HEIGHT) y = -20;
-    lv_obj_set_y(streak, y);
+  for (int i = 0; i < kRainStreakCount; i++) {
+    rainStreakY[i] += rainStreakSpeed[i];
+    rainStreakX[i] += rainStreakSpeed[i] * kRainSlant;
+    // Off the bottom OR off the right: a streak that has drifted out of
+    // frame would otherwise keep falling invisibly for the rest of its
+    // run, thinning the shower.
+    if (rainStreakY[i] > LCD_HEIGHT || rainStreakX[i] > LCD_WIDTH) {
+      respawnRainStreak(i, false);
+    }
+    lv_obj_set_pos(rainStreaks[i], static_cast<lv_coord_t>(rainStreakX[i]),
+                   static_cast<lv_coord_t>(rainStreakY[i]));
   }
 }
 
@@ -2774,11 +2830,13 @@ bool weatherSuppressed = false;
 void startWeatherEffect(WeatherService::Overlay overlay) {
   switch (overlay) {
     case WeatherService::Overlay::RAIN:
-      for (auto *streak : rainStreaks) {
-        lv_obj_set_y(streak, lv_rand(-LCD_HEIGHT, LCD_HEIGHT));
-        lv_obj_clear_flag(streak, LV_OBJ_FLAG_HIDDEN);
+      for (int i = 0; i < kRainStreakCount; i++) {
+        // Scattered, so a shower starts already falling rather than
+        // arriving as one rank from above.
+        respawnRainStreak(i, true);
+        lv_obj_clear_flag(rainStreaks[i], LV_OBJ_FLAG_HIDDEN);
       }
-      rainTimer = lv_timer_create(rainTickCb, 50, nullptr);
+      rainTimer = lv_timer_create(rainTickCb, kRainTickMs, nullptr);
       break;
     case WeatherService::Overlay::SUNGLASSES:
       // Not immediately on connect -- the first weather fetch lands a few
@@ -2952,8 +3010,12 @@ void init() {
     lv_obj_t *band = lv_obj_create(lv_scr_act());
     lv_obj_remove_style(band, nullptr, LV_PART_MAIN | LV_STATE_ANY);
     lv_obj_clear_flag(band, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_color_t colors[] = {lv_palette_main(LV_PALETTE_RED), lv_palette_main(LV_PALETTE_CYAN),
-                            lv_palette_main(LV_PALETTE_LIME), lv_color_white()};
+    // Overwritten on the first stutter frame before any of this is ever
+    // shown, so these are only a sane initial state -- but they match
+    // kBandColours and go through lv_color_make like everything else, so
+    // no palette call is left anywhere to be copied by accident.
+    lv_color_t colors[] = {lv_color_make(255, 60, 60), lv_color_make(60, 230, 255),
+                           lv_color_make(150, 255, 80), lv_color_white()};
     lv_obj_set_style_bg_color(band, colors[i % 4], LV_PART_MAIN);
     lv_obj_set_style_bg_opa(band, LV_OPA_70, LV_PART_MAIN);
     lv_obj_set_size(band, LCD_WIDTH, 3);
@@ -3029,11 +3091,14 @@ void init() {
     lv_obj_t *streak = lv_obj_create(lv_scr_act());
     lv_obj_remove_style(streak, nullptr, LV_PART_MAIN | LV_STATE_ANY);
     lv_obj_clear_flag(streak, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(streak, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(streak, LV_OPA_60, LV_PART_MAIN);
+    // lv_color_make, not lv_palette_main: this was the last user of the
+    // palette path, which is the one that rendered the hearts green.
+    // A pale blue rather than the palette's saturated one -- it has to sit
+    // behind the face, not compete with it.
+    lv_obj_set_style_bg_color(streak, lv_color_make(120, 180, 255), LV_PART_MAIN);
     lv_obj_set_style_radius(streak, 2, LV_PART_MAIN);
-    lv_obj_set_size(streak, 3, 16);
-    lv_obj_set_x(streak, (LCD_WIDTH / (kRainStreakCount + 1)) * (i + 1));
+    // Size, opacity and position are all owned by respawnRainStreak().
+    lv_obj_set_size(streak, 2, kRainLenMin);
     lv_obj_add_flag(streak, LV_OBJ_FLAG_HIDDEN);
     rainStreaks[i] = streak;
   }

@@ -32,6 +32,12 @@ struct Reading {
 
 void begin();
 
+// Wake the poll task now instead of letting it sleep out the rest of the
+// interval. Call it whenever something that changes the answer changes --
+// new coordinates, a new poll interval, a fresh network connection.
+// Safe before begin() (does nothing) and from any task.
+void requestRefresh();
+
 Reading current();
 
 }  // namespace WeatherService
