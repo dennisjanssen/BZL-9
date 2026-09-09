@@ -10,6 +10,8 @@ service; the only outbound request is a weather lookup.
 
 The face is drawn entirely from primitives at runtime — there are no image assets.
 
+Source and issues: <https://github.com/dennisjanssen/BZL-9>
+
 ---
 
 ## Hardware
@@ -52,7 +54,7 @@ the official one has not shipped Arduino-ESP32 core 3.x, which several of the
 pinned libraries require.
 
 ```bash
-git clone <your-repo-url> && cd BZL-9
+git clone https://github.com/dennisjanssen/BZL-9.git && cd BZL-9
 pio run -e esp32-c6-bzl9
 ```
 
