@@ -32,6 +32,9 @@ uint32_t moodRemainingMs = 0;
 
 bool moodOverride = false;
 State moodOverrideState = State::NEUTRAL;
+// What was running before the override took hold, so it can be resumed.
+State preOverrideMood = State::NEUTRAL;
+uint32_t preOverrideRemainingMs = 0;
 
 // SLEEPY is selectable even though it is normally schedule-driven -- the
 // user asked for it in the mood picker. SLEEPING is deliberately not:
@@ -45,12 +48,16 @@ bool isSelectableMood(State s) {
 // the SCHEDULE thinks, never what a manual override asked for.
 bool scheduleSleepy = false;
 
+// FOCUSED is deliberately NOT in this rotation. It is reserved as an
+// externally-driven signal -- the Claude Code hooks set it while Claude is
+// working -- and a signal you cannot distinguish from the face's own idle
+// behaviour is not a signal. It stays available through
+// setDayMoodOverride(), just never drawn at random.
 State pickDayMood() {
   long roll = random(100);
-  if (roll < 40) return State::NEUTRAL;
-  if (roll < 62) return State::BORED;
-  if (roll < 82) return State::EXCITED;
-  return State::FOCUSED;
+  if (roll < 45) return State::NEUTRAL;
+  if (roll < 75) return State::BORED;
+  return State::EXCITED;
 }
 
 void rerollDayMood() {
@@ -172,6 +179,12 @@ void maybeStartOverlay(const TimeInput &time) {
     return;
   }
 
+  // Nothing cosmetic interrupts FOCUSED. It is the "Claude is working"
+  // signal now, and a face that randomly glitches mid-signal is a face you
+  // stop trusting. Reminders still fire -- those are for the user's
+  // benefit, not decoration.
+  if (dayMood == State::FOCUSED) return;
+
   uint32_t avgIntervalSec = static_cast<uint32_t>(cfg.glitchAverageIntervalMinutes) * 60UL;
   if (avgIntervalSec > 0 && random(static_cast<long>(avgIntervalSec)) == 0) {
     overlay = Overlay::GLITCHED;
@@ -217,6 +230,14 @@ void update(const TimeInput &time) {
 
 void setDayMoodOverride(State mood) {
   if (!isSelectableMood(mood)) return;
+  // Remember what was running so clearDayMoodOverride() can put it back.
+  // Guarded on !moodOverride because the hooks re-assert the override on
+  // EVERY prompt -- without this, the second call would save the override
+  // itself and the real mood would be lost.
+  if (!moodOverride) {
+    preOverrideMood = dayMood;
+    preOverrideRemainingMs = moodRemainingMs;
+  }
   moodOverride = true;
   moodOverrideState = mood;
   dayMood = mood;
@@ -225,7 +246,14 @@ void setDayMoodOverride(State mood) {
 
 void clearDayMoodOverride() {
   moodOverride = false;
-  moodRemainingMs = 0;  // reroll on the next tick rather than finishing the held one
+  // RESUME what was running, rather than rerolling. This used to force an
+  // immediate reroll, which was fine for an occasional manual pick but is
+  // wrong once the Claude Code hooks clear the override at the end of
+  // every turn: the face would draw a fresh random mood after each reply
+  // and churn between poses all day. If the resumed hold has already
+  // expired, tickDayMood() rerolls on the next tick anyway.
+  dayMood = preOverrideMood;
+  moodRemainingMs = preOverrideRemainingMs;
 }
 
 bool dayMoodOverridden() { return moodOverride; }

@@ -96,6 +96,13 @@
 // nothing else in this project uses RMT.
 #define RGB_LED_PIN    8
 
+// --- mDNS ---
+// The device answers to "<MDNS_HOSTNAME>.local" once it joins a network, so
+// scripts and hooks do not have to chase a DHCP-assigned IP. Keep it short
+// and lowercase: mDNS labels are case-insensitive and some resolvers are
+// fussy about anything exotic.
+#define MDNS_HOSTNAME  "bzl9"
+
 // --- BOOT button ---
 // UNCONFIRMED. Neither the wiki's onboard-resources text nor the Arduino/
 // ESP-IDF demo source (checked) states the GPIO for this board's BOOT

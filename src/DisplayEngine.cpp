@@ -203,6 +203,22 @@ bool heartEyesVisible = false;
 // determined, outer-down reads tired).
 lv_obj_t *browCanvas[2] = {nullptr, nullptr};
 bool browsVisible = false;
+
+// The sustained pose the current mood asked for. applyMoodState() only
+// APPLIES a pose when the state changes, so without this an expression had
+// nothing to hand the face back to -- it restored hardcoded NEUTRAL values
+// and a bored or focused face stayed wrong until the mood next rolled, up
+// to ten minutes later.
+struct MoodPose {
+  lv_coord_t eyeHeight;
+  uint16_t mouthStart;
+  uint16_t mouthEnd;
+  lv_coord_t eyeDriftX;
+  float basePitch;
+  lv_coord_t browInner;
+  lv_coord_t browOuter;
+};
+MoodPose currentPose = {kEyeHeight, kMouthAngleStart, kMouthAngleEnd, 0, 0.0f, 0, 0};
 constexpr lv_coord_t kBrowW = 44;  // slightly wider than the eye, so it always spans it
 constexpr lv_coord_t kBrowH = 26;
 constexpr lv_coord_t kBrowOverhang = 4;  // wedge starts this far above the eye's top edge
@@ -212,6 +228,60 @@ constexpr lv_coord_t kBrowOverhang = 4;  // wedge starts this far above the eye'
 // setIdleLevel() zeroes the channels when a mood takes the face over --
 // a sustained droop has to survive that.
 float basePitch = 0;
+
+// --- Waving hand ---
+// For the "I need you" reaction. Sits in the empty strip to the right of
+// the face, above the water bottle -- their y ranges do not overlap, so a
+// hydration reminder and a wave can coexist without collision.
+lv_obj_t *handCanvas = nullptr;
+constexpr lv_coord_t kHandW = 38;
+constexpr lv_coord_t kHandH = 50;
+constexpr lv_coord_t kHandCx = 286;
+constexpr lv_coord_t kHandCy = 52;
+// Rotate about the wrist, not the middle, or it pinwheels instead of waving.
+constexpr lv_coord_t kHandPivotX = kHandW / 2;
+constexpr lv_coord_t kHandPivotY = kHandH - 2;
+// How far the face slides left to clear the hand. See the note at the call
+// site: most of this is spent cancelling the head turn.
+constexpr lv_coord_t kWaveShiftPx = -26;
+
+// --- Whistling ---
+// The mouth is the existing round gape held small and wobbling; the note
+// is its own canvas that drifts up and away. `whistling` is an OWNERSHIP
+// flag in the same sense as `snoring`: several routines release the gape
+// when they finish, and they all have to be told that something sustained
+// is holding it.
+lv_obj_t *noteCanvas[2] = {nullptr, nullptr};
+bool whistling = false;
+// Set while the mood is FOCUSED. That mood is the "Claude is working"
+// signal, so nothing decorative may interrupt it -- sunglasses dropping on
+// mid-task is exactly the confusion this avoids.
+bool cameosSuppressed = false;
+// Defined with the whistle machinery further down. A no-op unless a
+// whistle is actually running; clearExpressionDecorations() needs it, and
+// sits above the definition.
+void restartWhistleMotion();
+// Also defined below: the idle flourish scheduler sits above it.
+void playWhistle();
+// TWO of them, alternating. With one canvas, spawning a note before the
+// previous had finished drifting simply restarted it -- the first vanished
+// mid-flight. Two lets them overlap, which is what makes a faster stream
+// read as whistling rather than as one note stuttering.
+bool noteVisible[2] = {false, false};
+float noteProgress[2] = {0.0f, 0.0f};
+int nextNoteSlot = 0;
+constexpr lv_coord_t kNoteW = 16;
+constexpr lv_coord_t kNoteH = 24;
+// Spawns just off the mouth and drifts up and to the right.
+constexpr lv_coord_t kNoteBaseX = kFaceCenterX + 34;
+constexpr lv_coord_t kNoteBaseY = kMouthCenterY + kMouthRadius - 4;
+constexpr lv_coord_t kWhistleSwayTenths = 38;  // +-3.8 degrees of head sway
+constexpr lv_coord_t kWhistleBobPx = 3;
+// A whistle is now a brief flourish, not a mood: long enough for four or
+// five notes, short enough to stay a moment.
+constexpr uint32_t kWhistleDurationMs = 5500;
+constexpr float kNoteDriftX = 26.0f;
+constexpr float kNoteDriftY = 46.0f;
 
 // --- Snore bubble ---
 // Replaces the old "Zzz" text label. Two reasons: text needed a whole
@@ -830,7 +900,7 @@ void playMouthChatter() {
 // fight a blink landing mid-yawn.
 void yawnDoneCb(lv_anim_t *) {
   // Snoring holds the round mouth open on its own; don't snatch it back.
-  if (!snoring) setGapeMode(GapeMode::HIDDEN);
+  if (!snoring && !whistling) setGapeMode(GapeMode::HIDDEN);
 }
 
 void playMouthYawn() {
@@ -1008,13 +1078,25 @@ void flourishSchedCb(lv_timer_t *t) {
   if (idleLevel == IdleLevel::FULL) {
     // Weighted toward the mouth now that it has five shapes rather than
     // one; tilt and squint were carrying too much of the idle variety.
+    // While whistling, the sway owns the tilt and the whistle owns the
+    // mouth -- a one-shot tilt would replace the sway and never restore
+    // it, and a mouth flourish (a yawn especially) would steal the gape.
+    // Squints and head turns compose fine, so those are all that is left.
     int32_t roll = lv_rand(0, 99);
-    if (roll < 18) {
+    if (whistling) {
+      if (roll < 50) {
+        playSquint();
+      } else {
+        playHeadTurn();
+      }
+    } else if (roll < 16) {
       playTilt();
-    } else if (roll < 34) {
+    } else if (roll < 31) {
       playSquint();
-    } else if (roll < 56) {
+    } else if (roll < 51) {
       playHeadTurn();
+    } else if (roll < 63) {
+      playWhistle();
     } else {
       playMouthFlourish();
     }
@@ -1397,6 +1479,153 @@ void drawHeartShape(lv_obj_t *canvas) {
   lv_canvas_draw_polygon(canvas, trianglePts, 3, &rectDsc);
 }
 
+uint8_t noteCanvasBuf[2][LV_IMG_BUF_SIZE_TRUE_COLOR_ALPHA(kNoteW, kNoteH)];
+
+// A quaver: oval head, stem, flag.
+void drawNoteShape(lv_obj_t *canvas) {
+  lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
+
+  lv_draw_rect_dsc_t d;
+  lv_draw_rect_dsc_init(&d);
+  d.bg_color = lv_color_white();
+  d.bg_opa = LV_OPA_COVER;
+
+  d.radius = LV_RADIUS_CIRCLE;
+  lv_canvas_draw_rect(canvas, 0, 15, 11, 8, &d);  // head
+  d.radius = 0;
+  lv_canvas_draw_rect(canvas, 9, 2, 2, 15, &d);   // stem
+  static const lv_point_t kFlag[4] = {{11, 2}, {15, 6}, {15, 11}, {11, 7}};
+  lv_canvas_draw_polygon(canvas, kFlag, 4, &d);
+}
+
+// Positioned directly rather than composited: notes leave the face rather
+// than riding it, same as the cloud and the bottle. The second slot is
+// nudged sideways so overlapping notes do not trace the same line.
+void updateNotePos(int i) {
+  float t = noteProgress[i];
+  lv_coord_t lane = (i == 0) ? 0 : 9;
+  lv_obj_set_pos(noteCanvas[i],
+                 kNoteBaseX + lane + static_cast<lv_coord_t>(t * kNoteDriftX) - kNoteW / 2,
+                 kNoteBaseY - static_cast<lv_coord_t>(t * kNoteDriftY) - kNoteH / 2);
+  // In fast, hold, then out. lv_img draws with img_opa (NOT the generic
+  // opa style), so that is the one to set on a canvas.
+  float a = (t < 0.15f) ? (t / 0.15f) : ((t > 0.60f) ? (1.0f - t) / 0.40f : 1.0f);
+  if (a < 0.0f) a = 0.0f;
+  lv_obj_set_style_img_opa(noteCanvas[i], static_cast<lv_opa_t>(a * 255.0f), LV_PART_MAIN);
+}
+
+// One callback per slot: each animation needs a distinct var+exec_cb pair
+// or starting the second would delete the first.
+void noteAExecCb(void *, int32_t permille) {
+  noteProgress[0] = permille / 1000.0f;
+  updateNotePos(0);
+}
+void noteBExecCb(void *, int32_t permille) {
+  noteProgress[1] = permille / 1000.0f;
+  updateNotePos(1);
+}
+void noteADoneCb(lv_anim_t *) {
+  noteVisible[0] = false;
+  lv_obj_add_flag(noteCanvas[0], LV_OBJ_FLAG_HIDDEN);
+}
+void noteBDoneCb(lv_anim_t *) {
+  noteVisible[1] = false;
+  lv_obj_add_flag(noteCanvas[1], LV_OBJ_FLAG_HIDDEN);
+}
+
+void spawnNote() {
+  int i = nextNoteSlot;
+  nextNoteSlot ^= 1;
+
+  noteVisible[i] = true;
+  noteProgress[i] = 0.0f;
+  updateNotePos(i);
+  lv_obj_clear_flag(noteCanvas[i], LV_OBJ_FLAG_HIDDEN);
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, noteCanvas[i]);
+  lv_anim_set_exec_cb(&a, (i == 0) ? noteAExecCb : noteBExecCb);
+  lv_anim_set_values(&a, 0, 1000);
+  lv_anim_set_time(&a, 1900);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_out);  // drifts off, slowing
+  lv_anim_set_ready_cb(&a, (i == 0) ? noteADoneCb : noteBDoneCb);
+  lv_anim_start(&a);
+}
+
+void hideNotes() {
+  lv_anim_del(noteCanvas[0], noteAExecCb);
+  lv_anim_del(noteCanvas[1], noteBExecCb);
+  for (int i = 0; i < 2; i++) {
+    noteVisible[i] = false;
+    noteProgress[i] = 0.0f;
+    lv_obj_add_flag(noteCanvas[i], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+uint8_t handCanvasBuf[LV_IMG_BUF_SIZE_TRUE_COLOR_ALPHA(kHandW, kHandH)];
+
+// Drawn on a canvas like the heart and the cloud, because loose
+// overlapping objects read as loose overlapping objects.
+//
+// Three things do the work of making it look like a hand rather than a
+// mitten: the fingers are DIFFERENT LENGTHS (middle longest, then ring,
+// index, pinky) instead of a uniform comb; they use LV_RADIUS_CIRCLE so
+// each is a capsule with a properly domed tip; and the thumb is a slanted
+// polygon with a round cap rather than another axis-aligned box. All four
+// fingers end at the same y, tucked under the palm, so the joins vanish.
+void drawHandShape(lv_obj_t *canvas) {
+  lv_canvas_fill_bg(canvas, lv_color_black(), LV_OPA_TRANSP);
+
+  lv_draw_rect_dsc_t d;
+  lv_draw_rect_dsc_init(&d);
+  d.bg_color = lv_color_white();
+  d.bg_opa = LV_OPA_COVER;
+
+  // Fingers: {x, y, height}. Width 5, all ending at y=33 under the palm.
+  static const lv_coord_t kFingers[4][3] = {
+      {9, 11, 22},   // index
+      {15, 7, 26},   // middle -- longest
+      {21, 10, 23},  // ring
+      {27, 16, 17},  // pinky -- shortest
+  };
+  d.radius = LV_RADIUS_CIRCLE;
+  for (const auto &f : kFingers) {
+    lv_canvas_draw_rect(canvas, f[0], f[1], 5, f[2], &d);
+  }
+
+  // Thumb tip, then the slanted shaft joining it to the palm.
+  lv_canvas_draw_rect(canvas, 1, 22, 8, 8, &d);
+  d.radius = 0;
+  static const lv_point_t kThumb[4] = {{11, 38}, {2, 29}, {6, 24}, {15, 33}};
+  lv_canvas_draw_polygon(canvas, kThumb, 4, &d);
+
+  d.radius = 9;
+  lv_canvas_draw_rect(canvas, 8, 27, 25, 18, &d);  // palm
+  d.radius = 4;
+  lv_canvas_draw_rect(canvas, 13, 41, 15, 8, &d);  // wrist
+}
+
+// LVGL's angle space is 0..3600 tenths of a degree, so animating straight
+// from 3400 to 200 would sweep 340 degrees the long way round. The
+// animation therefore runs over a SIGNED range and normalises here, at the
+// one point where it matters.
+void waveExecCb(void *, int32_t tenths) {
+  int32_t a = tenths % 3600;
+  if (a < 0) a += 3600;
+  lv_img_set_angle(handCanvas, static_cast<int16_t>(a));
+}
+
+void setHandVisible(bool visible) {
+  if (visible) {
+    lv_obj_clear_flag(handCanvas, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_anim_del(handCanvas, waveExecCb);
+    lv_img_set_angle(handCanvas, 0);
+    lv_obj_add_flag(handCanvas, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
 uint8_t cloudCanvasBuf[LV_IMG_BUF_SIZE_TRUE_COLOR_ALPHA(kCloudW, kCloudH)];
 
 // A flat-bottomed, lumpy-topped cloud: one rounded base plus three
@@ -1559,7 +1788,13 @@ void setHeartVisible(bool visible) {
 lv_timer_t *expressionTimer = nullptr;  // clears one-shot express decorations after a delay
 
 void clearExpressionDecorations(lv_timer_t *) {
-  animateBaselineTo(kEyeHeight, kMouthAngleStart, kMouthAngleEnd, 0);
+  // Back to the MOOD's pose, not to neutral. Restoring hardcoded defaults
+  // here is what left a bored or focused face sitting at neutral eye
+  // height and mouth after every expression.
+  animateBaselineTo(currentPose.eyeHeight, currentPose.mouthStart, currentPose.mouthEnd,
+                    currentPose.eyeDriftX);
+  animateBasePitchTo(currentPose.basePitch, 320);
+  setBrows(currentPose.browInner, currentPose.browOuter);
   // An expression can land mid-yawn or mid-grin; drop those channels so
   // the mouth can't be left stuck open or half-gaped.
   lv_anim_del(&ch, mouthOpenExecCb);
@@ -1568,6 +1803,12 @@ void clearExpressionDecorations(lv_timer_t *) {
   setHeartVisible(false);
   stopShockLook();
   setShockMouthVisible(false);
+  // The gape teardown above (and setShockMouthVisible's HIDDEN) would
+  // otherwise leave a whistling mood with no mouth and a frozen wobble;
+  // the `wave` expression also drives tiltExecCb, which would have
+  // replaced the sway and left the head still.
+  restartWhistleMotion();
+  setHandVisible(false);
   hideSnoreBubble();
   setBottleVisible(false);
   // Same reasoning as hideGlitch(): repeat_count=1 means LVGL deletes this
@@ -1801,7 +2042,7 @@ void stopHydrationRoutine() {
   ch.headYaw = 0;
   ch.gapeScale = 0;
   setBottleVisible(false);
-  if (gapeMode != GapeMode::SHOCK) setGapeMode(GapeMode::HIDDEN);
+  if (gapeMode != GapeMode::SHOCK && !whistling) setGapeMode(GapeMode::HIDDEN);
   renderFace();
 }
 
@@ -1941,6 +2182,7 @@ void endShadesCameo() {
 void shadesHideCb(lv_timer_t *) { endShadesCameo(); }
 
 void playShadesCameo() {
+  if (cameosSuppressed) return;
   if (shadesHideTimer != nullptr) return;  // already wearing them
   // Only one piece of scenery at a time. playRainCameo() holds the
   // mirror-image guard, so whichever fires first keeps the stage.
@@ -1999,6 +2241,116 @@ void stopWeatherEffects() {
     ch.faceOffY = 0;
     renderFace();
   }
+}
+
+// --- Whistling ---
+lv_timer_t *whistleNoteTimer = nullptr;
+
+void whistleNoteCb(lv_timer_t *t) {
+  spawnNote();
+  // Roughly one note per second. Each drifts for 1.9s, so two are usually
+  // in the air at once -- which is the point of having two canvases.
+  lv_timer_set_period(t, lv_rand(850, 1400));
+}
+
+// Everything a whistle continuously owns: the pursed mouth, a side-to-side
+// sway, and a smaller vertical bob. Separate from startWhistling() because
+// expressions tear these channels down on their way out -- the gape in
+// clearExpressionDecorations(), and the tilt in the `wave` expression --
+// and the mood underneath has to get them back.
+void restartWhistleMotion() {
+  if (!whistling) return;
+
+  // A small circle that keeps changing size: a whistle is a pitch, and a
+  // fixed hole reads as a gasp instead.
+  setGapeMode(GapeMode::ROUND);
+  lv_anim_t mouth;
+  lv_anim_init(&mouth);
+  lv_anim_set_var(&mouth, &ch);
+  lv_anim_set_exec_cb(&mouth, gapeScaleExecCb);
+  lv_anim_set_values(&mouth, 120, 300);
+  lv_anim_set_time(&mouth, 900);
+  lv_anim_set_playback_time(&mouth, 1100);  // uneven, so it does not tick
+  lv_anim_set_repeat_count(&mouth, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_path_cb(&mouth, lv_anim_path_ease_in_out);
+  lv_anim_start(&mouth);
+
+  // Head sway. 1700ms per full cycle against the mouth's 2000ms, so the
+  // two drift in and out of phase instead of locking into one beat.
+  lv_anim_t sway;
+  lv_anim_init(&sway);
+  lv_anim_set_var(&sway, &ch);
+  lv_anim_set_exec_cb(&sway, tiltExecCb);
+  lv_anim_set_values(&sway, -kWhistleSwayTenths, kWhistleSwayTenths);
+  lv_anim_set_time(&sway, 850);
+  lv_anim_set_playback_time(&sway, 850);
+  lv_anim_set_repeat_count(&sway, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_path_cb(&sway, lv_anim_path_ease_in_out);
+  lv_anim_start(&sway);
+
+  // Vertical bob at roughly twice the sway rate, so it reads as nodding
+  // along rather than just leaning. Uses postureExecCb because that is
+  // already the faceOffY writer -- a second callback on the same channel
+  // would not replace it, it would fight it.
+  lv_anim_t bob;
+  lv_anim_init(&bob);
+  lv_anim_set_var(&bob, &ch);
+  lv_anim_set_exec_cb(&bob, postureExecCb);
+  lv_anim_set_values(&bob, 0, -kWhistleBobPx);
+  lv_anim_set_time(&bob, 410);
+  lv_anim_set_playback_time(&bob, 430);
+  lv_anim_set_repeat_count(&bob, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_path_cb(&bob, lv_anim_path_ease_in_out);
+  lv_anim_start(&bob);
+}
+
+lv_timer_t *whistleEndTimer = nullptr;
+void stopWhistling();
+
+void whistleEndCb(lv_timer_t *) {
+  // repeat_count=1: LVGL frees this on return, so only drop the reference.
+  whistleEndTimer = nullptr;
+  stopWhistling();
+}
+
+// A short burst, started either by the idle flourish scheduler or by
+// /api/express. It owns its own lifetime rather than going through the
+// shared expression timer, the same way the glitch effect does.
+void playWhistle() {
+  if (whistling) return;
+  whistling = true;
+  ch.gapeScale = 0.15f;
+  restartWhistleMotion();
+
+  spawnNote();  // one straight away, so the burst starts with a note
+  whistleNoteTimer = lv_timer_create(whistleNoteCb, lv_rand(850, 1400), nullptr);
+
+  whistleEndTimer = lv_timer_create(whistleEndCb, kWhistleDurationMs, nullptr);
+  lv_timer_set_repeat_count(whistleEndTimer, 1);
+}
+
+void stopWhistling() {
+  if (!whistling) return;
+  whistling = false;
+  if (whistleEndTimer != nullptr) {
+    // Still pending, so we own it (unlike from inside its own callback).
+    lv_timer_del(whistleEndTimer);
+    whistleEndTimer = nullptr;
+  }
+  if (whistleNoteTimer != nullptr) {
+    lv_timer_del(whistleNoteTimer);
+    whistleNoteTimer = nullptr;
+  }
+  lv_anim_del(&ch, gapeScaleExecCb);
+  lv_anim_del(&ch, tiltExecCb);
+  lv_anim_del(&ch, postureExecCb);
+  ch.gapeScale = 0;
+  ch.tiltTenths = 0;
+  ch.faceOffY = 0;
+  hideNotes();
+  // A shock reaction may have taken the gape mid-whistle; leave it alone.
+  if (gapeMode != GapeMode::SHOCK) setGapeMode(GapeMode::HIDDEN);
+  renderFace();
 }
 
 // --- Sleepy: periodic yawns ---
@@ -2090,9 +2442,10 @@ void stopSnoring() {
   snoring = false;
   lv_anim_del(&ch, gapeScaleExecCb);
   ch.gapeScale = 0;
-  // A shock reaction owns the gape for its 2.5s; a mood change landing in
-  // the middle of one must not snatch the open mouth back off it.
-  if (gapeMode != GapeMode::SHOCK) setGapeMode(GapeMode::HIDDEN);
+  // A shock reaction owns the gape for its 2.5s, and a whistle owns it for
+  // the whole mood; a mood change landing in the middle of either must not
+  // snatch the open mouth back off it.
+  if (gapeMode != GapeMode::SHOCK && !whistling) setGapeMode(GapeMode::HIDDEN);
   hideSnoreBubble();
   renderFace();
 }
@@ -2146,7 +2499,7 @@ void rainDropTickCb(lv_timer_t *) {
 void releaseRainCameoGape() {
   if (!rainCameoTookGape) return;
   rainCameoTookGape = false;
-  if (snoring || gapeMode == GapeMode::SHOCK) return;
+  if (snoring || whistling || gapeMode == GapeMode::SHOCK) return;
   lv_anim_del(&ch, gapeScaleExecCb);
   ch.gapeScale = 0;
   setGapeMode(GapeMode::HIDDEN);
@@ -2171,6 +2524,7 @@ void endRainCameo() {
 void rainCameoEndCb(lv_timer_t *) { endRainCameo(); }
 
 void playRainCameo() {
+  if (cameosSuppressed) return;
   if (rainCameoActive) return;
   // Don't stack scenery: the shades own the face's attention while they
   // are down.
@@ -2452,6 +2806,23 @@ void init() {
   lv_obj_set_pos(glitchFlash, 0, 0);
   lv_obj_add_flag(glitchFlash, LV_OBJ_FLAG_HIDDEN);
 
+  // Music note for the whistling mood.
+  for (int i = 0; i < 2; i++) {
+    noteCanvas[i] = lv_canvas_create(lv_scr_act());
+    lv_canvas_set_buffer(noteCanvas[i], noteCanvasBuf[i], kNoteW, kNoteH,
+                         LV_IMG_CF_TRUE_COLOR_ALPHA);
+    drawNoteShape(noteCanvas[i]);
+    lv_obj_add_flag(noteCanvas[i], LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // Waving hand.
+  handCanvas = lv_canvas_create(lv_scr_act());
+  lv_canvas_set_buffer(handCanvas, handCanvasBuf, kHandW, kHandH, LV_IMG_CF_TRUE_COLOR_ALPHA);
+  drawHandShape(handCanvas);
+  lv_img_set_pivot(handCanvas, kHandPivotX, kHandPivotY);
+  lv_obj_set_pos(handCanvas, kHandCx - kHandW / 2, kHandCy - kHandH / 2);
+  lv_obj_add_flag(handCanvas, LV_OBJ_FLAG_HIDDEN);
+
   // Rain-forecast cloud + its drops.
   cloudCanvas = lv_canvas_create(lv_scr_act());
   lv_canvas_set_buffer(cloudCanvas, cloudCanvasBuf, kCloudW, kCloudH, LV_IMG_CF_TRUE_COLOR_ALPHA);
@@ -2685,19 +3056,46 @@ void applyMoodState(MoodEngine::State state) {
   bool isTransientOverlay =
       isPoseless || state == MoodEngine::State::POSTURE_REMINDER;
 
+  // Recorded on EVERY call, not just when the state changes, so it is
+  // always current for an expression to restore. Skipped for poseless
+  // states, whose locals are all neutral defaults and would otherwise
+  // overwrite the real mood a glitch happened to interrupt.
+  if (!isPoseless) {
+    currentPose = {targetEyeHeight, targetMouthStart, targetMouthEnd,
+                   targetDrift,     targetPitch,      browInner,
+                   browOuter};
+    // Recomputed every call, not just on change, so it stays right even if
+    // the state is re-entered.
+    cameosSuppressed = (state == MoodEngine::State::FOCUSED);
+  }
+
   // applyMoodState() is called once a SECOND regardless of whether the
   // state actually changed (main.cpp's tick() contract). animateBaselineTo()
   // starts a real animation, so (re)starting it every second -- even toward
   // the same target -- restarted the baseline mid-flight and read as a
   // twitch. Only touch any of this when the state actually changed.
   if (stateChanged && !isPoseless) {
+    // A whistle in flight has to end here. setIdleLevel() below tears
+    // down the very channels it is driving, which would otherwise leave
+    // `whistling` true with dead animations -- the mouth stuck open and
+    // never released.
+    stopWhistling();
+
     // Idle level first: it zeroes the animation channels, and the calls
     // below then install the new sustained pose on top.
     setIdleLevel(level);
 
-    animateBaselineTo(targetEyeHeight, targetMouthStart, targetMouthEnd, targetDrift);
-    animateBasePitchTo(targetPitch, 600);
-    setBrows(browInner, browOuter);
+    // An expression owns the face's SHAPE while it runs, so a mood rolling
+    // mid-expression must not reach in and repaint the brows or baseline
+    // over it. Nothing is lost by waiting: currentPose was updated above,
+    // and clearExpressionDecorations() installs it when the expression
+    // releases. Everything else below applies immediately -- falling
+    // asleep during an expression should still start the snore.
+    if (expressionTimer == nullptr) {
+      animateBaselineTo(targetEyeHeight, targetMouthStart, targetMouthEnd, targetDrift);
+      animateBasePitchTo(targetPitch, 600);
+      setBrows(browInner, browOuter);
+    }
     startBreathing(breathHalfMs, breathAmp);
     flourishMinMs = flourishMin;
     flourishMaxMs = flourishMax;
@@ -2722,6 +3120,7 @@ void applyMoodState(MoodEngine::State state) {
     } else {
       stopPostureRoutine();
     }
+
 
     // The routine itself shows the bottle (and fills it); this only has to
     // take it away when the reminder is over.
@@ -2757,7 +3156,22 @@ void applyWeatherOverlay(WeatherService::Overlay overlay) {
 
 constexpr uint32_t kExpressionHoldMs = 2500;
 
+// An expression is a whole face, not a modifier on the current one. The
+// mood's eye-shape treatments have to come off first or they show through:
+// the brow wedges in particular are drawn ON TOP of the heart canvases
+// (created later, so painted later), which is what made heart eyes look
+// broken in `bored` and `focused`. clearExpressionDecorations() puts the
+// mood's pose back afterwards.
+void neutraliseMoodShaping() {
+  setBrows(0, 0);
+  animateBasePitchTo(0.0f, 220);
+}
+
 void triggerExpression(const char *expression) {
+  // Glitch returns early below and is deliberately poseless, so it does
+  // NOT get this treatment -- it is an effect layered over the mood.
+  if (strcmp(expression, "glitch") != 0) neutraliseMoodShaping();
+
   if (strcmp(expression, "shock") == 0) {
     startShockLook();
     setShockMouthVisible(true);
@@ -2783,6 +3197,41 @@ void triggerExpression(const char *expression) {
     // separates a grin from merely a wider version of the resting mouth.
     animateExpressionTo(kEyeHeight, 20, 160, 0);
     playChannelOutAndBack(mouthOpenExecCb, 700, 220, 380, kExpressionHoldMs - 640);
+  } else if (strcmp(expression, "wave") == 0) {
+    // "I need you." A hand comes up beside the face and waves, and the
+    // face turns toward you with a small smile rather than the alarmed
+    // look `shock` gives -- this is a request for attention, not a fright.
+    setHandVisible(true);
+    lv_anim_t w;
+    lv_anim_init(&w);
+    lv_anim_set_var(&w, handCanvas);
+    lv_anim_set_exec_cb(&w, waveExecCb);
+    lv_anim_set_values(&w, -200, 200);  // +-20 degrees about the wrist
+    lv_anim_set_time(&w, 330);
+    lv_anim_set_playback_time(&w, 330);
+    lv_anim_set_repeat_count(&w, 3);
+    lv_anim_set_path_cb(&w, lv_anim_path_ease_in_out);
+    lv_anim_start(&w);
+
+    // Shift left to make room for the hand, and lean with it so it is not
+    // a flat slide. kWaveShiftPx is larger than the movement it produces:
+    // turning to look at the hand already carries the features ~13px
+    // RIGHT via the yaw cylinder, so the first 13px of shift only cancels
+    // that out. -26 nets about -12px of real travel.
+    playChannelOutAndBack(faceOffXExecCb, kWaveShiftPx, 440, 600, kExpressionHoldMs - 1050,
+                          lv_anim_path_ease_out);
+    // Negative tilt is counter-clockwise on screen (the rotation runs in a
+    // y-down frame), so the top of the head goes away from the hand.
+    playChannelOutAndBack(tiltExecCb, -45, 460, 620, kExpressionHoldMs - 1080);
+
+    playChannelOutAndBack(headYawExecCb, 260, 420, 560, kExpressionHoldMs - 1000,
+                          lv_anim_path_ease_out);
+    playChannelOutAndBack(mouthExecCb, 420, 320, 520, kExpressionHoldMs - 900);
+  } else if (strcmp(expression, "whistle") == 0) {
+    // Owns its own lifetime, so it skips the shared expression timer
+    // entirely -- same arrangement as glitch below.
+    playWhistle();
+    return;
   } else if (strcmp(expression, "glitch") == 0) {
     playGlitchEffect();
     return;  // glitch clears itself via its own timer, not the shared one below

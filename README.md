@@ -87,8 +87,10 @@ wrong after a change to anything in `data/`, run `uploadfs`.
      a placeholder, not a guess about you.
    - **Timezone** — a POSIX TZ string, e.g. `CET-1CEST,M3.5.0,M10.5.0/3`.
    - **Workday start / end** — drives the whole sleep schedule.
-5. Save. It reconnects to your network; the dashboard is then at the IP shown in
-   the serial log (or find it on your router).
+5. Save. It reconnects to your network and is then reachable at
+   **<http://bzl9.local>** — it registers that name over mDNS on every
+   connect. The IP is also printed to the serial log and shown on the
+   dashboard, in case mDNS is blocked on your network.
 
 The AP is deliberately open. It carries no secrets until you type them into it,
 and requiring a password you cannot see anywhere is a poor first-run experience.
@@ -101,11 +103,18 @@ applies immediately, no reboot.
 
 ## What it does
 
-**Day moods** — cycles at random between `neutral`, `bored`, `excited` and
-`focused`, holding each for 3–10 minutes. Each has its own resting pose: eye
-height, mouth shape, head tilt, breathing rate, and how often it fidgets. Eyebrow
-angle is faked by masking the top of each eye, so `focused` looks determined and
-`bored` looks unimpressed.
+**Day moods** — cycles at random between `neutral`, `bored` and `excited`,
+holding each for 3–10 minutes. Each has its own resting pose: eye height, mouth
+shape, head tilt, breathing rate, and how often it fidgets. Eyebrow angle is faked
+by masking the top of each eye, so `bored` looks unimpressed.
+
+`focused` exists as a further mood but is **never drawn at random** — it is
+reserved for external callers, so that when something sets it (the Claude Code
+hooks below, or the dashboard) you know the face is reacting to that and not just
+idling. A signal you cannot tell apart from ordinary behaviour is not a signal.
+While `focused` is held, the weather cameos and random glitches are suppressed
+for the same reason: sunglasses dropping onto the face mid-task would undo it.
+Hydration and posture reminders still fire — those are for you, not decoration.
 
 You can pin a mood from the dashboard, or leave it on **Auto**. A pinned mood is
 dropped overnight so a forgotten one does not outlive the day.
@@ -124,11 +133,136 @@ streaks fall when it rains, and when rain is *forecast later today* a small clou
 drifts in and it recoils from it, wide-eyed.
 
 **Expressions** — one-shot reactions from the dashboard: `shock`, `heart`, `rage`,
-`sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`.
+`sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`, `wave`, `whistle`.
+
+`wave` raises a small hand beside the face and waves it — meant for "I need you"
+rather than the alarm that `shock` conveys. `whistle` purses the mouth into a
+small circle that keeps changing pitch, sways and bobs the head, and sends music
+notes drifting off for about five seconds; it also fires on its own now and then
+as an idle flourish.
 
 **Status LED** — the onboard WS2812. Off by default; pick any colour in the
 portal. Note this board's LED is wired **RGB, not the usual GRB** — if you port
 this and red/green come out swapped, that is why.
+
+---
+
+## Claude Code integration
+
+The device answers to **`bzl9.local`** on your network (mDNS), and the mood and
+expression endpoints hold no state in flash — they can be called as often as you
+like. That makes it easy to drive the face from
+[Claude Code hooks](https://code.claude.com/docs/en/hooks), so you can tell at a
+glance whether Claude is working or waiting for you.
+
+**Use `focused`, not one of the other moods.** It is the one mood the random
+rotation never picks, so if the face is focused, something asked for it — no
+other mood can give you that. While it is held, the weather cameos and random
+glitches are suppressed too, so nothing decorative interrupts the signal.
+Substituting `bored` or `excited` would work mechanically and tell you nothing,
+because the face reaches those on its own.
+
+Put this in `~/.claude/settings.json` (all projects) or `.claude/settings.json`
+(one project):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "curl -s -X POST http://bzl9.local/api/mood -H \"Content-Type: application/json\" -d \"{\\\"mood\\\":\\\"focused\\\"}\" --max-time 2"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "curl -s -X POST http://bzl9.local/api/mood -H \"Content-Type: application/json\" -d \"{\\\"mood\\\":\\\"auto\\\"}\" --max-time 2"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "curl -s -X POST http://bzl9.local/api/express -H \"Content-Type: application/json\" -d \"{\\\"expression\\\":\\\"wave\\\"}\" --max-time 2"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "curl -s -X POST http://bzl9.local/api/mood -H \"Content-Type: application/json\" -d \"{\\\"mood\\\":\\\"auto\\\"}\" --max-time 2"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The content-type header is not optional — the device rejects the request without
+it. The inner quotes are escaped twice because the shell command is itself a
+JSON string.
+
+### Or use the wrapper (recommended on Windows)
+
+`tools/bzl9.cmd` does the same thing without the nested quoting, and is what the
+hooks should call on Windows — it does not care which shell Claude Code invokes,
+and it **always exits 0**:
+
+```json
+"command": "\"C:\\path\\to\\BZL-9\\tools\\bzl9.cmd\" working"
+```
+
+with `working`, `waiting` or `attention` as the argument. Check connectivity
+first with:
+
+```
+tools\bzl9.cmd test
+```
+
+which prints `/api/status` and tells you whether the hooks will work.
+
+> **Why always exit 0.** `Stop` is a *blockable* hook event — a hook exiting
+> with code 2 stops Claude's turn — and curl uses exit 2 for "failed to
+> initialize". Without that guard, unplugging the device could hang your
+> assistant. The wrapper makes it impossible.
+
+Edit `HOST` at the top of the script if you use an IP instead of mDNS.
+
+| Hook | Fires | Face |
+|---|---|---|
+| `UserPromptSubmit` | before Claude starts a turn | settles into `focused` |
+| `Stop` | Claude has finished, waiting on you | back to the mood rotation |
+| `Notification` (`permission_prompt`) | Claude is blocked on approval | raises a hand and waves |
+| `SessionEnd` | session closes | releases |
+
+Two things worth knowing:
+
+- **`Stop` is a blockable event** — a hook exiting with code 2 stops Claude's
+  turn. Curl only uses exit 2 for "failed to initialize", but it is worth making
+  the command incapable of returning it (append `|| true`, or wrap it in a script
+  that always exits 0) rather than risking your assistant hanging because a desk
+  ornament did not answer.
+- **`--max-time` matters.** Hooks run synchronously; without a cap, an
+  unreachable device would stall each turn until the hook timeout.
 
 ---
 
@@ -159,12 +293,28 @@ rejected with HTTP 400 rather than silently clamped.
 
 | Endpoint | |
 |---|---|
-| `GET /api/status` | state, uptime, Wi-Fi, weather |
+| `GET /api/status` | state, uptime, Wi-Fi, weather, `moodOverride` |
 | `GET /api/config` | current settings (**never** returns passwords) |
 | `POST /api/config` | partial update; only the keys you send change |
-| `POST /api/express` | `{"expression": "shock"}` |
-| `POST /api/mood` | `{"mood": "bored"}` or `"auto"` |
+| `POST /api/express` | `{"expression": "…"}` |
+| `POST /api/mood` | `{"mood": "…"}` |
 | `POST /api/reboot` | |
+
+`POST /api/mood` accepts `auto`, `neutral`, `bored`, `excited`, `focused` and
+`sleepy`. `auto` returns to the random rotation; anything else pins that mood
+until changed, and is dropped overnight.
+
+`POST /api/express` accepts `shock`, `heart`, `rage`, `sleepy`, `glitch`,
+`hydrate`, `unimpressed`, `grin`, `wave` and `whistle`. These are one-shot and
+release themselves.
+
+Both take `Content-Type: application/json`, reject anything outside those lists
+with HTTP 400, and hold no state in flash — safe to call as often as you like.
+`POST /api/config` is the exception: it writes NVS, so **do not** drive it from
+anything that fires per-turn.
+
+Note `/api/status` is a **1 Hz snapshot**, so a change you just POSTed may take a
+second to appear there.
 
 ---
 
@@ -178,40 +328,43 @@ Served at `/update` (ElegantOTA), behind HTTP basic auth as user `admin`.
 
 OTA writes to the inactive app slot, so a bad image cannot brick the device.
 
-**Firmware only, in practice.** ElegantOTA's page offers a "filesystem" mode, but
-it will not work on this partition table: the Arduino `Update` library looks for a
-partition with the **`spiffs`** subtype (`0x82`), while `partitions.csv` declares
-`littlefs` (`0x83`), so the lookup finds nothing and the upload fails. Dashboard
-changes therefore need `uploadfs` over USB.
+**Filesystem updates work too.** ElegantOTA's page offers a "firmware" and a
+"filesystem" mode; upload `.pio/build/esp32-c6-bzl9/littlefs.bin` in the latter to
+push dashboard changes without a cable.
 
-If you want working filesystem OTA, declare the partition with subtype `spiffs`
-but keep the label `littlefs` — the mount call finds it by *label*, so LittleFS
-keeps working while `Update` can finally see it. Changing the partition table
-means one USB flash and it wipes the filesystem.
+This only works because the filesystem partition declares subtype **`spiffs`**
+while keeping the *name* `littlefs`. Nothing is SPIFFS-formatted — it is LittleFS
+throughout — but the Arduino `Update` library looks up
+`ESP_PARTITION_SUBTYPE_DATA_SPIFFS` (`0x82`) and would never find `0x83`, so with
+the obvious subtype the mode silently failed. `LittleFS.begin(..., "littlefs")`
+locates the partition by *label*, so both coexist. Don't "correct" that subtype.
 
 ---
 
 ## Layout and limits
 
-4 MB of flash, partitioned as two 1.6875 MB OTA slots plus 576 KB LittleFS:
+4 MB of flash, partitioned as two 1.875 MB OTA slots plus 192 KB LittleFS:
 
 ```
-nvs       0x009000   20 KB    settings
+nvs       0x009000   20 KB    settings (survives everything below)
 otadata   0x00e000    8 KB
-app0      0x010000  1.6875 MB
-app1      0x1C0000  1.6875 MB
-littlefs  0x370000  576 KB    web assets (~11 KB used)
+app0      0x010000  1.875 MB
+app1      0x1F0000  1.875 MB
+littlefs  0x3D0000  192 KB    web assets (~15 KB used)
 ```
 
-**The firmware sits at about 90% of one OTA slot.** If you add much, you will run
-out. The cheapest fix is repartitioning: LittleFS holds ~11 KB of assets, so
-shrinking it to 128 KB and giving the space to both app slots drops usage to
-around 80% with no code changes. Be aware that moving the app offsets means one
-USB flash (you cannot OTA into a new layout) and it wipes the filesystem.
+The firmware sits at about **83%** of one OTA slot, leaving ~329 KB.
 
-Beyond that, roughly 36 KB of unused LVGL widget classes are linked because the
-default theme references every enabled widget — disabling the ones this project
-never creates is the next easiest win.
+**App partition offsets must be 64 KB aligned** — `gen_esp32part.py` enforces
+`ALIGNMENT[APP_TYPE] = 0x10000` and refuses anything else. That is what fixes the
+slot size at `0x1E0000` and leaves 192 KB for the filesystem rather than a round
+128 KB. Shrinking the filesystem below that buys **no** extra app space; it just
+strands the difference as an unusable gap.
+
+If you ever need more, roughly 36 KB of unused LVGL widget classes are still
+linked because the default theme references every enabled widget — disabling the
+ones this project never creates is the next win, though note the theme is also
+what supplies `arc_rounded` for the mouth's rounded ends.
 
 **No font is compiled in.** `LV_FONT_DEFAULT` is `NULL` and every montserrat font
 is disabled, because the display draws nothing but shapes — that is worth ~14 KB.

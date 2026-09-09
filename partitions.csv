@@ -1,13 +1,35 @@
 # Name,      Type, SubType,   Offset,   Size,      Flags
-# REVISED again at Stage 4: adding WiFi/ESPAsyncWebServer/ArduinoJson/
-# ElegantOTA/LittleFS/DNSServer pushed the firmware to ~1.44MB, over the
-# 1.25MB OTA slots sized back at Stage 1 (which only accounted for the
-# bring-up build). Grew each OTA slot to 1.6875MB (a WiFi+web+LVGL+OTA
-# firmware on a 4MB part is inherently tight -- there isn't room to be
-# generous everywhere), shrinking LittleFS accordingly since the actual
-# web assets are only a few small files (~15KB total).
+#
+# 4MB flash. Two equal OTA app slots plus a small filesystem for the web
+# dashboard.
+#
+# REVISED (2026-09-09): the filesystem was 576KB holding ~15KB of assets --
+# an allocation guessed at Stage 1 before anything existed -- while the app
+# slots sat at 92% full. That space moved to the app slots.
+#
+# APP OFFSETS MUST BE 64KB ALIGNED. gen_esp32part.py enforces
+# ALIGNMENT[APP_TYPE] = 0x10000 and rejects anything else, so the slot size
+# has to be a multiple of 0x10000 for app1's offset to land legally. That
+# caps each slot at 0x1E0000 (30 x 64KB) and leaves 0x30000 for the
+# filesystem -- 192KB rather than the 128KB originally aimed at. Shrinking
+# the filesystem further would NOT buy more app space; it would just strand
+# the difference as an unusable gap.
+#
+# The filesystem subtype is deliberately `spiffs`, not `littlefs`, while the
+# NAME stays `littlefs`. Nothing here is SPIFFS-formatted -- it is LittleFS
+# throughout. The reason is that the Arduino `Update` library looks up
+# ESP_PARTITION_SUBTYPE_DATA_SPIFFS (0x82) for filesystem OTA and would
+# never find 0x83, so ElegantOTA's "filesystem" mode silently failed.
+# LittleFS.begin(..., "littlefs") locates the partition by LABEL, and
+# PlatformIO's uploadfs accepts either subtype, so both keep working.
+#
+# Previous layout, for reference:
+#   app0/app1 0x1B0000 each, littlefs 0x90000 @ 0x370000
+# Moving the app offsets means this cannot be reached by OTA -- it needs one
+# USB flash, and it erases the filesystem (rebuild it with `uploadfs`).
+# NVS is untouched at 0x9000, so stored settings survive.
 nvs,        data, nvs,       0x9000,   0x5000,
 otadata,    data, ota,       0xe000,   0x2000,
-app0,       app,  ota_0,     0x10000,  0x1B0000,
-app1,       app,  ota_1,     0x1C0000, 0x1B0000,
-littlefs,   data, littlefs,  0x370000, 0x90000,
+app0,       app,  ota_0,     0x10000,  0x1E0000,
+app1,       app,  ota_1,     0x1F0000, 0x1E0000,
+littlefs,   data, spiffs,    0x3D0000, 0x30000,

@@ -7,6 +7,7 @@
 #include <ElegantOTA.h>
 #include <LittleFS.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -158,6 +159,17 @@ void updateNetworking() {
   if (WiFi.status() == WL_CONNECTED) {
     if (netState != NetState::CONNECTED) {
       Serial.printf("[WebPortal] STA connected, IP=%s\n", WiFi.localIP().toString().c_str());
+      // Started here rather than once at boot, and torn down first
+      // every time: the responder binds to the network interface, so
+      // one started before a reconnect (or before Wi-Fi existed at
+      // all) quietly stops answering without reporting an error.
+      MDNS.end();
+      if (MDNS.begin(MDNS_HOSTNAME)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("[WebPortal] mDNS up: http://%s.local/\n", MDNS_HOSTNAME);
+      } else {
+        Serial.println("[WebPortal] mDNS failed to start (the IP still works)");
+      }
     }
     netState = NetState::CONNECTED;
     consecutiveFailures = 0;
@@ -314,8 +326,9 @@ void handleExpress(AsyncWebServerRequest *request, JsonVariant &json) {
     return;
   }
   const char *expr = json["expression"];
-  static const char *kValid[] = {"shock",  "heart",  "rage",        "sleepy",
-                                "glitch", "hydrate", "unimpressed", "grin"};
+  static const char *kValid[] = {"shock",  "heart",   "rage",        "sleepy",
+                                "glitch", "hydrate", "unimpressed", "grin",
+                                "wave",   "whistle"};
   bool ok = false;
   for (const char *v : kValid) {
     if (strcmp(expr, v) == 0) {
