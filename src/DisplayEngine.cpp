@@ -2224,8 +2224,17 @@ constexpr float kRainSpeedMax = 4.4f;   // ~147 px/s
 constexpr float kRainSlant = 0.26f;     // sideways drift as a fraction of fall
 constexpr lv_coord_t kRainLenMin = 9;
 constexpr lv_coord_t kRainLenMax = 22;
-constexpr int kRainOpaMin = 70;         // far: barely there
-constexpr int kRainOpaMax = 180;        // near: present, still not loud
+// Opacity MULTIPLIES the colour against a black screen, so these are the
+// brightness control, not just the fade. At the old 70 the far streaks
+// resolved to about (33,49,70) -- dark blue-grey on black, barely there
+// in the wrong sense. Raised so the dimmest streak is still legible.
+//
+// The ceiling is set against the eyes: those are pure white at full
+// opacity, and the brightest raindrop stays near three-quarters of their
+// perceived brightness, so the rain reads as weather in front of the face
+// rather than competing with it.
+constexpr int kRainOpaMin = 120;        // far: dim, but still clearly there
+constexpr int kRainOpaMax = 230;        // near: bright, still below the eyes
 
 lv_obj_t *rainStreaks[kRainStreakCount];
 float rainStreakX[kRainStreakCount];
@@ -3093,9 +3102,11 @@ void init() {
     lv_obj_clear_flag(streak, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     // lv_color_make, not lv_palette_main: this was the last user of the
     // palette path, which is the one that rendered the hearts green.
-    // A pale blue rather than the palette's saturated one -- it has to sit
-    // behind the face, not compete with it.
-    lv_obj_set_style_bg_color(streak, lv_color_make(120, 180, 255), LV_PART_MAIN);
+    //
+    // Nearly white, with just enough blue to read as water. A saturated
+    // blue looks right on a bright mockup and turns to dark navy once the
+    // per-streak opacity multiplies it against a black panel.
+    lv_obj_set_style_bg_color(streak, lv_color_make(175, 215, 255), LV_PART_MAIN);
     lv_obj_set_style_radius(streak, 2, LV_PART_MAIN);
     // Size, opacity and position are all owned by respawnRainStreak().
     lv_obj_set_size(streak, 2, kRainLenMin);
