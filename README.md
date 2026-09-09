@@ -133,7 +133,9 @@ streaks fall when it rains, and when rain is *forecast later today* a small clou
 drifts in and it recoils from it, wide-eyed.
 
 **Expressions** — one-shot reactions from the dashboard: `shock`, `heart`, `rage`,
-`sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`, `wave`, `whistle`.
+`sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`, `wave`, `whistle`,
+`posture`. `hydrate` and `posture` each run one cycle of the corresponding
+reminder, so you can see them without waiting for the interval.
 
 `wave` raises a small hand beside the face and waves it — meant for "I need you"
 rather than the alarm that `shock` conveys. `whistle` purses the mouth into a
@@ -305,8 +307,8 @@ rejected with HTTP 400 rather than silently clamped.
 until changed, and is dropped overnight.
 
 `POST /api/express` accepts `shock`, `heart`, `rage`, `sleepy`, `glitch`,
-`hydrate`, `unimpressed`, `grin`, `wave` and `whistle`. These are one-shot and
-release themselves.
+`hydrate`, `unimpressed`, `grin`, `wave`, `whistle` and `posture`. These are
+one-shot and release themselves.
 
 Both take `Content-Type: application/json`, reject anything outside those lists
 with HTTP 400, and hold no state in flash — safe to call as often as you like.

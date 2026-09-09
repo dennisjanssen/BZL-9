@@ -2680,6 +2680,24 @@ void init() {
   lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, LV_PART_MAIN);
 
+  // Nothing on this screen scrolls, and leaving scrolling enabled cost us a
+  // permanent grey bar along the bottom of the panel.
+  //
+  // The default theme puts a grey scrollbar style (LV_PALETTE_GREY at
+  // LV_OPA_40) on every parentless object, and a screen's default scrollbar
+  // mode is LV_SCROLLBAR_MODE_AUTO -- "draw whenever a child sticks out".
+  // The glitch bands are LCD_WIDTH wide and get torn sideways by up to
+  // +10px, so their right edge lands past 319 and AUTO starts drawing a
+  // horizontal scrollbar at the bottom edge. Hiding the bands again
+  // retracts the scroll extent, so LVGL simply stops drawing the scrollbar
+  // -- it does NOT invalidate the strip it was living in, and renderFace()
+  // never touches y=171, so the grey pixels stayed on the panel forever.
+  //
+  // The cloud, the wave hand and the drifting notes can all leave the frame
+  // too, so this is fixed at the screen rather than per-animation.
+  lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(lv_scr_act(), LV_SCROLLBAR_MODE_OFF);
+
   eyeLeft = createEye(kEyeLeftX);
   eyeRight = createEye(kEyeRightX);
   mouth = createMouth();
@@ -3235,6 +3253,17 @@ void triggerExpression(const char *expression) {
   } else if (strcmp(expression, "glitch") == 0) {
     playGlitchEffect();
     return;  // glitch clears itself via its own timer, not the shared one below
+  } else if (strcmp(expression, "posture") == 0) {
+    // One complete cycle of the real reminder: stretch, then the footstep
+    // bobs two seconds later. Matches how `hydrate` gives you one sip
+    // rather than the whole 20s reminder.
+    //
+    // Returns early like whistle and glitch: postureRoutineCb's animations
+    // all terminate on their own and outlast the 2.5s expression hold, so
+    // routing it through the shared expression timer would cut the walk
+    // off halfway.
+    postureRoutineCb(nullptr);
+    return;
   } else if (strcmp(expression, "hydrate") == 0) {
     animateExpressionTo(kEyeHeight, kMouthAngleStart, kMouthAngleEnd, kHydrationDriftX);
     bottleLevel = 1.0f;

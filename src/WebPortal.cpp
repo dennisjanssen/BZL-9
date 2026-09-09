@@ -326,9 +326,9 @@ void handleExpress(AsyncWebServerRequest *request, JsonVariant &json) {
     return;
   }
   const char *expr = json["expression"];
-  static const char *kValid[] = {"shock",  "heart",   "rage",        "sleepy",
-                                "glitch", "hydrate", "unimpressed", "grin",
-                                "wave",   "whistle"};
+  static const char *kValid[] = {"shock",   "heart",   "rage",        "sleepy",
+                                "glitch",  "hydrate", "unimpressed", "grin",
+                                "wave",    "whistle", "posture"};
   bool ok = false;
   for (const char *v : kValid) {
     if (strcmp(expr, v) == 0) {
