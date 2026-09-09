@@ -2322,7 +2322,6 @@ void retractShades(uint32_t ms) {
 }
 
 void playShadesCameo() {
-  if (cameosSuppressed) return;
   if (shadesHideTimer != nullptr) return;  // already wearing them
   if (shadesRetracting) return;            // last pair still on its way out
   // Only one piece of scenery at a time. playRainCameo() holds the
@@ -2351,7 +2350,9 @@ void playShadesCameo() {
 }
 
 void shadesCameoSchedCb(lv_timer_t *t) {
-  playShadesCameo();
+  // Only the spontaneous cameo is suppressed during FOCUSED. Asking for
+  // one from the portal still works -- see playShadesCameo().
+  if (!cameosSuppressed) playShadesCameo();
   lv_timer_set_period(t, lv_rand(48000, 115000));
 }
 
@@ -2662,7 +2663,6 @@ void endRainCameo() {
 void rainCameoEndCb(lv_timer_t *) { endRainCameo(); }
 
 void playRainCameo() {
-  if (cameosSuppressed) return;
   if (rainCameoActive) return;
   // Don't stack scenery: the shades own the face's attention while they
   // are down.
@@ -2732,7 +2732,7 @@ void playRainCameo() {
 }
 
 void rainCameoSchedCb(lv_timer_t *t) {
-  playRainCameo();
+  if (!cameosSuppressed) playRainCameo();
   lv_timer_set_period(t, lv_rand(70000, 160000));
 }
 
@@ -2760,7 +2760,15 @@ void stopRainForecast() {
   setRainCameoHidden(true);
 }
 
+// Three things have an opinion about which overlay should be running, so
+// they get three variables rather than one that they take turns clobbering:
+// what the sky actually says, what the portal is simulating, and what is
+// on screen right now. wantedWeatherOverlay() resolves them.
 WeatherService::Overlay activeWeatherOverlay = WeatherService::Overlay::NONE;
+WeatherService::Overlay shownWeatherOverlay = WeatherService::Overlay::NONE;
+WeatherService::Overlay simWeatherOverlay = WeatherService::Overlay::NONE;
+bool weatherSimActive = false;
+lv_timer_t *weatherSimTimer = nullptr;
 bool weatherSuppressed = false;
 
 void startWeatherEffect(WeatherService::Overlay overlay) {
@@ -2786,9 +2794,27 @@ void startWeatherEffect(WeatherService::Overlay overlay) {
   }
 }
 
+WeatherService::Overlay wantedWeatherOverlay() {
+  if (weatherSuppressed) return WeatherService::Overlay::NONE;
+  return weatherSimActive ? simWeatherOverlay : activeWeatherOverlay;
+}
+
 void refreshWeatherEffect() {
+  WeatherService::Overlay want = wantedWeatherOverlay();
+  // main.cpp calls applyWeatherOverlay() once a second, so without this
+  // the effect would be torn down and rebuilt every tick -- which for the
+  // shades means a cameo that can never finish.
+  if (want == shownWeatherOverlay) return;
   stopWeatherEffects();
-  if (!weatherSuppressed) startWeatherEffect(activeWeatherOverlay);
+  shownWeatherOverlay = want;
+  startWeatherEffect(want);
+}
+
+void weatherSimEndCb(lv_timer_t *) {
+  // repeat_count=1 auto-frees this on return -- only drop the reference.
+  weatherSimTimer = nullptr;
+  weatherSimActive = false;
+  refreshWeatherEffect();
 }
 
 }  // namespace
@@ -3306,10 +3332,33 @@ void applyRainForecast(bool expected) {
 }
 
 void applyWeatherOverlay(WeatherService::Overlay overlay) {
-  if (overlay == activeWeatherOverlay) return;
+  // Recorded even while a simulation is running, so the real weather is
+  // already current the moment the simulation expires.
   activeWeatherOverlay = overlay;
   refreshWeatherEffect();
 }
+
+void simulateWeatherOverlay(WeatherService::Overlay overlay, uint32_t durationMs) {
+  if (weatherSimTimer != nullptr) {
+    // Still pending, so we own it (unlike from inside its own callback).
+    lv_timer_del(weatherSimTimer);
+    weatherSimTimer = nullptr;
+  }
+  weatherSimActive = overlay != WeatherService::Overlay::NONE;
+  simWeatherOverlay = overlay;
+  refreshWeatherEffect();
+  if (!weatherSimActive) return;
+
+  // SUNGLASSES is a cameo scheduler, not a continuous effect: left alone
+  // it would sit for 25 seconds before doing anything, which is right for
+  // the real thing and useless as a demonstration.
+  if (overlay == WeatherService::Overlay::SUNGLASSES) playShadesCameo();
+
+  weatherSimTimer = lv_timer_create(weatherSimEndCb, durationMs, nullptr);
+  lv_timer_set_repeat_count(weatherSimTimer, 1);
+}
+
+void playRainForecastCameo() { playRainCameo(); }
 
 constexpr uint32_t kExpressionHoldMs = 2500;
 

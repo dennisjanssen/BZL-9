@@ -43,6 +43,17 @@ void applyRainForecast(bool expected);
 // active, resumes once it clears.
 void applyWeatherOverlay(WeatherService::Overlay overlay);
 
+// Pins a weather overlay for durationMs so the portal can demonstrate one
+// without waiting for the sky to co-operate. The real reading keeps being
+// tracked underneath and takes over again when the simulation expires;
+// Overlay::NONE ends it immediately. Loop task only, like the rest.
+void simulateWeatherOverlay(WeatherService::Overlay overlay, uint32_t durationMs);
+
+// One rain-forecast cameo, now. A one-shot: unlike simulateWeatherOverlay
+// it changes no state at all, because the forecast cameo is already a
+// one-shot rather than a sustained overlay.
+void playRainForecastCameo();
+
 // One-shot manual expression from the portal's /api/express. Valid values
 // match the brief's set: "shock", "heart", "rage", "sleepy", "glitch",
 // "hydrate". Unknown values are ignored (WebPortal already validates

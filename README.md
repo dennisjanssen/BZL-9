@@ -126,6 +126,11 @@ workday ends (heavy lids, drooping head, yawning), then sleeps once it is over:
 eyes shut, and a snore — the face rises as the mouth falls open and a bubble
 inflates from it, then pops. Brightness fades to the sleep level.
 
+The whole schedule can be switched off from the dashboard. With it off the clock
+has no say at all: it never sleeps, never winds down as the end approaches, and
+reminders keep their intervals around the clock rather than only during the
+workday. You can still pin `sleepy` by hand — that never came from the clock.
+
 **Reminders** — on their own intervals, it drinks from a blue water bottle that
 visibly empties over four sips, and for the movement reminder it gets up
 and walks a couple of laps around the visor.
@@ -134,6 +139,10 @@ and walks a couple of laps around the visor.
 Sunglasses drop onto its face when it is clear, it shivers when it snows, rain
 streaks fall when it rains, and when rain is *forecast later today* a small cloud
 drifts in and it recoils from it, wide-eyed.
+
+The dashboard's **Weather** block pins any of these for 30 seconds so you can see
+them without waiting for the sky to co-operate. The real reading keeps being
+tracked underneath and takes over again when the simulation expires.
 
 **Expressions** — one-shot reactions from the dashboard: `shock`, `heart`, `rage`,
 `sleepy`, `glitch`, `hydrate`, `unimpressed`, `grin`, `wave`, `whistle`,
@@ -280,6 +289,7 @@ rejected with HTTP 400 rather than silently clamped.
 
 | Setting | Default | Range |
 |---|---|---|
+| Follow workday schedule | on | — |
 | Workday start / end | 09:00 / 17:30 | 00:00–23:59 |
 | Timezone | `CET-1CEST,M3.5.0,M10.5.0/3` | POSIX TZ |
 | Sleepy before end | 60 min | 5–240 |
@@ -304,6 +314,7 @@ rejected with HTTP 400 rather than silently clamped.
 | `POST /api/config` | partial update; only the keys you send change |
 | `POST /api/express` | `{"expression": "…"}` |
 | `POST /api/mood` | `{"mood": "…"}` |
+| `POST /api/weather` | `{"simulate": "…"}` |
 | `POST /api/reboot` | |
 
 `POST /api/mood` accepts `auto`, `neutral`, `bored`, `excited`, `focused` and
@@ -314,7 +325,13 @@ until changed, and is dropped overnight.
 `hydrate`, `unimpressed`, `grin`, `wave`, `whistle` and `movement`. These
 are one-shot and release themselves.
 
-Both take `Content-Type: application/json`, reject anything outside those lists
+`POST /api/weather` accepts `sunny`, `rain`, `cold`, `forecast` and `off`. The
+first three pin that overlay for 30 seconds and then hand back to the real
+reading; `off` hands it back immediately. `forecast` is a one-shot cameo and
+changes no state — note it declines to play while the sunglasses are down, since
+the two share the face.
+
+All three take `Content-Type: application/json`, reject anything outside those lists
 with HTTP 400, and hold no state in flash — safe to call as often as you like.
 `POST /api/config` is the exception: it writes NVS, so **do not** drive it from
 anything that fires per-turn.

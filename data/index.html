@@ -56,8 +56,25 @@
   </section>
 
   <section class="card">
+    <h2>Weather</h2>
+    <div class="button-grid" id="weather-grid">
+      <button data-wx="sunny">Sunny</button>
+      <button data-wx="rain">Raining</button>
+      <button data-wx="cold">Cold</button>
+      <button data-wx="forecast">Rain later</button>
+      <button data-wx="off">Back to real</button>
+    </div>
+    <p class="hint">Pins an overlay for 30 seconds so you can see it without waiting for the sky. &ldquo;Rain later&rdquo; plays the forecast cameo once. The real weather takes over again on its own.</p>
+  </section>
+
+  <section class="card">
     <h2>Configuration</h2>
     <form id="config-form">
+      <div class="field-row">
+        <label for="c-schedule-on">Follow workday schedule</label>
+        <input type="checkbox" id="c-schedule-on" name="scheduleEnabled">
+      </div>
+      <p class="hint">Off: never sleeps, never winds down as the end approaches, and reminders run around the clock. The three fields below are then unused.</p>
       <div class="field-row">
         <label for="c-workday-start">Workday start</label>
         <input type="time" id="c-workday-start" name="workdayStartMinutes">

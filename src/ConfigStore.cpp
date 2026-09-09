@@ -37,6 +37,7 @@ struct LockGuard {
 void loadAll() {
   current.schemaVersion = prefs.getUShort("schemaVer", kSchemaVersion);
 
+  current.scheduleEnabled = prefs.getBool("schedOn", true);
   current.workdayStartMinutes = prefs.getUShort("wdStart", 540);
   current.workdayEndMinutes = prefs.getUShort("wdEnd", 1050);
   prefs.getString("tz", current.timezone, sizeof(current.timezone));
@@ -220,6 +221,13 @@ bool setSleepBrightnessPercent(uint8_t v) {
 
 // No range to reject -- both values are meaningful. Returns bool only to
 // match the shape of every other setter here.
+bool setScheduleEnabled(bool v) {
+  LockGuard lock;
+  current.scheduleEnabled = v;
+  prefs.putBool("schedOn", v);
+  return true;
+}
+
 bool setSleepyLeadMinutes(uint16_t v) {
   if (v < 5 || v > 240) return false;
   LockGuard lock;

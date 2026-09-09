@@ -19,6 +19,12 @@ struct Config {
   uint16_t schemaVersion = kSchemaVersion;
 
   // --- Schedule ---
+  // With this off the clock has no say over the face: no overnight sleep,
+  // no wind-down as the workday end approaches, and reminders keep their
+  // intervals around the clock instead of only during the workday. The
+  // workday times and sleepy lead below are then unused, but kept so
+  // turning it back on restores what was configured.
+  bool scheduleEnabled = true;
   uint16_t workdayStartMinutes = 540;   // 09:00. Range 0-1439.
   uint16_t workdayEndMinutes = 1050;    // 17:30. Range 0-1439, must be > start.
   char timezone[64] = "CET-1CEST,M3.5.0,M10.5.0/3";  // POSIX TZ string.
@@ -104,6 +110,7 @@ bool setWorkdayEndMinutes(uint16_t v);
 bool setTimezone(const char *v);
 bool setHydrationIntervalMinutes(uint16_t v);
 bool setMovementIntervalMinutes(uint16_t v);
+bool setScheduleEnabled(bool v);
 bool setSleepyLeadMinutes(uint16_t v);
 bool setLatitude(float v);
 bool setLongitude(float v);

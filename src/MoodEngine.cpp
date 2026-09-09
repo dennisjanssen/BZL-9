@@ -131,6 +131,15 @@ void refreshOverlayExpiry() {
 // device was winding down and clear the very override that set it, one
 // second after it was chosen.
 State computeScheduleState(const TimeInput &time) {
+  // Schedule switched off in the portal: the clock gets no say at all.
+  // Not just SLEEPING -- the wind-down goes with it, since "sleepy an hour
+  // before the workday ends" is meaningless once there is no workday.
+  // Day moods then roll around the clock, and a manually picked SLEEPY
+  // still works because that never came through here.
+  if (!ConfigStore::get().scheduleEnabled) {
+    scheduleSleepy = false;
+    return State::NEUTRAL;
+  }
   if (!time.timeKnown) {
     scheduleSleepy = false;
     return State::NEUTRAL;
@@ -157,9 +166,13 @@ void maybeStartOverlay(const TimeInput &time) {
   // another.
   if (overlay != Overlay::NONE || baseState == State::SLEEPING) return;
   if (baseState == State::SLEEPY) return;  // let the wind-down read as a wind-down
-  if (!time.timeKnown || !time.isWorkday) return;
 
   const auto &cfg = ConfigStore::get();
+  // Normally reminders are a workday thing. With the schedule off there is
+  // no workday to be outside of, so they run whenever the device is on --
+  // including before the clock has been set, which the schedule path
+  // cannot allow but this one has no reason to care about.
+  if (cfg.scheduleEnabled && (!time.timeKnown || !time.isWorkday)) return;
 
   // Priority when multiple are due in the same tick (ASSUMPTION, brief
   // asks this be defined explicitly): MOVEMENT > HYDRATION > GLITCHED.

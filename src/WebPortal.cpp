@@ -50,9 +50,11 @@ const char *stateName(MoodEngine::State s) {
 }
 
 // --- Command queue (AsyncTCP task enqueues, loop task drains/applies) ---
-enum class CommandType : uint8_t { EXPRESS, CONFIG_UPDATE, REBOOT, MOOD };
+enum class CommandType : uint8_t { EXPRESS, CONFIG_UPDATE, REBOOT, MOOD, WEATHER };
 
 struct ConfigUpdatePayload {
+  bool hasScheduleEnabled = false;
+  bool scheduleEnabled = false;
   bool hasWorkdayStart = false;
   uint16_t workdayStart = 0;
   bool hasWorkdayEnd = false;
@@ -96,8 +98,14 @@ struct Command {
   CommandType type;
   char expression[16] = "";
   char mood[12] = "";
+  char weather[12] = "";
   ConfigUpdatePayload config;
 };
+
+// How long a simulated weather overlay is pinned for. Long enough to
+// watch rain fall or a shiver settle, short enough that a forgotten
+// simulation does not hide the real weather all afternoon.
+constexpr uint32_t kWeatherSimMs = 30000;
 
 QueueHandle_t commandQueue = nullptr;
 
@@ -210,6 +218,7 @@ void applyCommand(const Command &cmd) {
       break;
     case CommandType::CONFIG_UPDATE: {
       const auto &c = cmd.config;
+      if (c.hasScheduleEnabled) ConfigStore::setScheduleEnabled(c.scheduleEnabled);
       if (c.hasWorkdayStart) ConfigStore::setWorkdayStartMinutes(c.workdayStart);
       if (c.hasWorkdayEnd) ConfigStore::setWorkdayEndMinutes(c.workdayEnd);
       if (c.hasTimezone) {
@@ -265,6 +274,21 @@ void applyCommand(const Command &cmd) {
         MoodEngine::setDayMoodOverride(MoodEngine::State::FOCUSED);
       } else if (strcmp(m, "sleepy") == 0) {
         MoodEngine::setDayMoodOverride(MoodEngine::State::SLEEPY);
+      }
+      break;
+    }
+    case CommandType::WEATHER: {
+      const char *w = cmd.weather;
+      if (strcmp(w, "off") == 0) {
+        DisplayEngine::simulateWeatherOverlay(WeatherService::Overlay::NONE, 0);
+      } else if (strcmp(w, "sunny") == 0) {
+        DisplayEngine::simulateWeatherOverlay(WeatherService::Overlay::SUNGLASSES, kWeatherSimMs);
+      } else if (strcmp(w, "rain") == 0) {
+        DisplayEngine::simulateWeatherOverlay(WeatherService::Overlay::RAIN, kWeatherSimMs);
+      } else if (strcmp(w, "cold") == 0) {
+        DisplayEngine::simulateWeatherOverlay(WeatherService::Overlay::SHIVER, kWeatherSimMs);
+      } else if (strcmp(w, "forecast") == 0) {
+        DisplayEngine::playRainForecastCameo();
       }
       break;
     }
@@ -374,10 +398,38 @@ void handleMood(AsyncWebServerRequest *request, JsonVariant &json) {
   request->send(200, "application/json", "{\"ok\":true}");
 }
 
+// Weather simulation. Same validate-here / apply-on-the-loop-task shape
+// as the mood and express handlers: nothing below AsyncTCP may touch LVGL.
+void handleWeather(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!json["simulate"].is<const char *>()) {
+    request->send(400, "application/json", "{\"error\":\"missing simulate\"}");
+    return;
+  }
+  const char *w = json["simulate"];
+  static const char *kValid[] = {"off", "sunny", "rain", "cold", "forecast"};
+  bool ok = false;
+  for (const char *v : kValid) {
+    if (strcmp(w, v) == 0) {
+      ok = true;
+      break;
+    }
+  }
+  Command cmd{};
+  if (!ok || strlen(w) >= sizeof(cmd.weather)) {
+    request->send(400, "application/json", "{\"error\":\"invalid simulate\"}");
+    return;
+  }
+  cmd.type = CommandType::WEATHER;
+  strncpy(cmd.weather, w, sizeof(cmd.weather) - 1);
+  enqueue(cmd);
+  request->send(200, "application/json", "{\"ok\":true}");
+}
+
 void handleGetConfig(AsyncWebServerRequest *request) {
   auto cfg = ConfigStore::get();
   JsonDocument doc;
   doc["schemaVersion"] = cfg.schemaVersion;
+  doc["scheduleEnabled"] = cfg.scheduleEnabled;
   doc["workdayStartMinutes"] = cfg.workdayStartMinutes;
   doc["workdayEndMinutes"] = cfg.workdayEndMinutes;
   doc["timezone"] = cfg.timezone;
@@ -420,6 +472,10 @@ void handlePostConfig(AsyncWebServerRequest *request, JsonVariant &json) {
   cmd.type = CommandType::CONFIG_UPDATE;
   auto &c = cmd.config;
 
+  if (json["scheduleEnabled"].is<bool>()) {
+    c.hasScheduleEnabled = true;
+    c.scheduleEnabled = json["scheduleEnabled"];
+  }
   if (json["workdayStartMinutes"].is<int>()) {
     int v = json["workdayStartMinutes"];
     if (!validateRange(request, "workdayStartMinutes", v, 0, 1439)) return;
@@ -575,6 +631,7 @@ void begin() {
   server.on("/api/status", HTTP_GET, handleStatus);
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/express", handleExpress));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/mood", handleMood));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/weather", handleWeather));
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/config", handlePostConfig));
   server.on("/api/reboot", HTTP_POST, handleReboot);

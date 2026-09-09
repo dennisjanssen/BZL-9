@@ -77,6 +77,7 @@ async function loadConfig() {
   try {
     const res = await fetch("/api/config");
     const c = await res.json();
+    document.getElementById("c-schedule-on").checked = !!c.scheduleEnabled;
     document.getElementById("c-workday-start").value = minutesToTime(c.workdayStartMinutes);
     document.getElementById("c-workday-end").value = minutesToTime(c.workdayEndMinutes);
     document.getElementById("c-timezone").value = c.timezone;
@@ -111,6 +112,12 @@ document.getElementById("express-grid").addEventListener("click", (e) => {
   postJson("/api/express", { expression: btn.dataset.expr });
 });
 
+document.getElementById("weather-grid").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-wx]");
+  if (!btn) return;
+  postJson("/api/weather", { simulate: btn.dataset.wx });
+});
+
 document.getElementById("btn-reboot").addEventListener("click", () => {
   if (confirm("Reboot the device?")) postJson("/api/reboot", {});
 });
@@ -119,6 +126,7 @@ document.getElementById("config-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const msg = document.getElementById("config-msg");
   const payload = {
+    scheduleEnabled: document.getElementById("c-schedule-on").checked,
     workdayStartMinutes: timeToMinutes(document.getElementById("c-workday-start").value),
     workdayEndMinutes: timeToMinutes(document.getElementById("c-workday-end").value),
     timezone: document.getElementById("c-timezone").value,
