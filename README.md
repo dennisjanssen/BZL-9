@@ -173,9 +173,26 @@ visibly empties over four sips, and for the movement reminder it gets up
 and walks a couple of laps around the visor.
 
 **Weather** — fetched from [Open-Meteo](https://open-meteo.com/) (no API key).
-Sunglasses drop onto its face when it is clear, it shivers when it snows, rain
-streaks fall when it rains, and when rain is *forecast later today* a small cloud
-drifts in and it recoils from it, wide-eyed.
+Sunglasses drop onto its face under a clear sky, rain streaks fall when it rains,
+and it shivers when it snows **or when it is simply cold** (at or below 3 °C).
+When rain is *forecast later today* a small cloud drifts in and it recoils from
+it, wide-eyed. Grey, cloudy and foggy days get no overlay at all — most weather
+is unremarkable, and a face that comments on all of it stops being worth reading.
+
+Two notes on accuracy, because the obvious failure modes are ours rather than
+Open-Meteo's. `current.weather_code` is a *model interpretation*, not a station
+observation, and it reports drizzle fairly freely — so the light rain codes
+(drizzle, slight rain, slight showers) are cross-checked against the measured
+`current.precipitation` and show nothing unless something is actually falling.
+Moderate rain and above is believed outright, because a thunderstorm reading
+0 mm is far more likely to be a gauge interval that has not caught up than a
+wrong forecast. And only WMO code 0 (clear sky) earns sunglasses; code 1 is
+"mainly clear", which was putting them on during hazy overcast-ish days.
+
+If the weather looks wrong, **check your latitude and longitude first** — they
+default to Brussels, which is a placeholder, not a guess about you. The dashboard
+and the serial log both show the raw WMO code, so you can tell a wrong reading
+from a wrong mapping.
 
 The dashboard's **Weather** block pins any of these for 30 seconds so you can see
 them without waiting for the sky to co-operate. The real reading keeps being

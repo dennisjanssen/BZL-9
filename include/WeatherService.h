@@ -18,6 +18,10 @@ struct Reading {
   float temperatureC = 0.0f;
   int weatherCode = -1;
   float precipitationMm = 0.0f;
+  // Whether `precipitationMm` came from the response at all. A missing
+  // field reads as 0.0, which is indistinguishable from "dry" -- and the
+  // overlay logic treats those two very differently.
+  bool precipitationKnown = false;
   Overlay overlay = Overlay::NONE;
 
   // --- Today's forecast, as opposed to `overlay`'s right-now conditions ---

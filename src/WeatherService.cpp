@@ -54,44 +54,113 @@ constexpr uint32_t kFailRetryMaxMs = 300000;
 constexpr int kRainChanceThresholdPercent = 50;
 constexpr float kRainSumThresholdMm = 0.5f;
 
-Overlay mapWeatherCode(int code) {
+// ASSUMPTION: no threshold for "cold enough to shiver" is given anywhere,
+// so 3C is a documented choice -- near freezing, coat weather, and low
+// enough that a merely cool spring day does not trigger it. Temperature
+// was fetched from the very first version and then never used by
+// anything, which is why the face could not react to cold at all.
+constexpr float kShiverTempC = 3.0f;
+
+// Below this, nothing is actually falling. Open-Meteo's `current.weather_code`
+// is a model interpretation rather than a station observation, and it
+// reports drizzle and light rain fairly freely; cross-checking it against
+// the measured precipitation kills most of the false showers.
+//
+// TRADEOFF: `current.precipitation` covers the preceding interval, so the
+// first minutes of a genuine light shower can still read as 0, and the
+// face shows nothing until the next poll catches it. Preferred over the
+// alternative, which was rain streaks on a dry grey afternoon. Only the
+// light codes are held to this -- see rainNeedsConfirming().
+constexpr float kPrecipFloorMm = 0.05f;
+
+bool isSnowCode(int code) {
   switch (code) {
-    case 0:
-    case 1:
-      return Overlay::SUNGLASSES;
-    case 2:
-    case 3:
-    case 45:
-    case 48:
-      return Overlay::NONE;
-    case 51:
-    case 53:
-    case 55:
-    case 56:
-    case 57:
-    case 61:
-    case 63:
-    case 65:
-    case 66:
-    case 67:
-    case 80:
-    case 81:
-    case 82:
-    case 95:
-    case 96:
-    case 99:
-      return Overlay::RAIN;
-    case 71:
-    case 73:
-    case 75:
-    case 77:
-    case 85:
-    case 86:
-      return Overlay::SHIVER;
+    case 71: case 73: case 75: case 77: case 85: case 86:
+      return true;
     default:
-      Serial.printf("[WeatherService] unmapped WMO weather_code: %d\n", code);
-      return Overlay::NONE;
+      return false;
   }
+}
+
+bool isRainCode(int code) {
+  switch (code) {
+    case 51: case 53: case 55: case 56: case 57:
+    case 61: case 63: case 65: case 66: case 67:
+    case 80: case 81: case 82:
+    case 95: case 96: case 99:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Which rain codes have to prove themselves against the rain gauge.
+//
+// Only the light end. The model is promiscuous with drizzle and "slight"
+// rain, which is what the cross-check is for -- but a thunderstorm or a
+// violent shower reading 0mm is far more likely to be a gauge interval
+// that has not caught up than a wrong forecast, and showing nothing
+// during a storm is a much worse failure than a few seconds of spurious
+// drizzle. Heavy codes are believed outright.
+bool rainNeedsConfirming(int code) {
+  switch (code) {
+    case 51: case 53: case 55: case 56: case 57:  // drizzle, all grades
+    case 61: case 66:                             // slight rain, slight freezing rain
+    case 80:                                      // slight showers
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Grey and foggy days deliberately get NO overlay. Kept as an explicit
+// case rather than falling through to the default so it does not log an
+// "unmapped code" warning every fetch -- these are mapped, to nothing.
+bool isGreyCode(int code) {
+  switch (code) {
+    case 2:   // partly cloudy
+    case 3:   // overcast
+    case 45:  // fog
+    case 48:  // depositing rime fog
+      return true;
+    default:
+      return false;
+  }
+}
+
+// REVISED: this used to be a pure function of the weather code, which made
+// the face wrong in three separate ways.
+//
+//  - Code 1 is "mainly clear", not clear, and it was putting sunglasses on
+//    during hazy overcast-ish days. Only code 0 earns them now.
+//  - Temperature was never consulted, so a dry -2C morning showed nothing:
+//    SHIVER fired on snow alone.
+//  - The light rain codes were believed outright, including the drizzle
+//    the model hands out freely. Now the measured precipitation has to
+//    agree before streaks are shown.
+//
+// Order matters and is deliberate: what is falling out of the sky beats
+// how cold it is, and cold beats how bright it is. Putting cold ahead of
+// clear means a crisp sunny -2C day shivers rather than reaching for
+// sunglasses -- swap those two blocks if you would rather have the joke.
+Overlay pickOverlay(int code, float tempC, float precipMm, bool precipKnown) {
+  if (isSnowCode(code)) return Overlay::SHIVER;
+
+  if (isRainCode(code)) {
+    if (!rainNeedsConfirming(code)) return Overlay::RAIN;
+    if (!precipKnown || precipMm >= kPrecipFloorMm) return Overlay::RAIN;
+    // The model says light rain and the gauge says nothing: show nothing.
+    return Overlay::NONE;
+  }
+
+  if (tempC <= kShiverTempC) return Overlay::SHIVER;
+
+  if (code == 0) return Overlay::SUNGLASSES;
+  if (code == 1) return Overlay::NONE;      // mainly clear: nothing worth saying
+  if (isGreyCode(code)) return Overlay::NONE;  // grey/foggy: also nothing
+
+  Serial.printf("[WeatherService] unmapped WMO weather_code: %d\n", code);
+  return Overlay::NONE;
 }
 
 void publish(const Reading &r) {
@@ -150,8 +219,10 @@ bool fetchOnce() {
   r.stale = false;
   r.temperatureC = doc["current"]["temperature_2m"];
   r.weatherCode = doc["current"]["weather_code"];
-  r.precipitationMm = doc["current"]["precipitation"] | 0.0f;
-  r.overlay = mapWeatherCode(r.weatherCode);
+  auto precip = doc["current"]["precipitation"];
+  r.precipitationKnown = precip.is<float>();
+  r.precipitationMm = precip | 0.0f;
+  r.overlay = pickOverlay(r.weatherCode, r.temperatureC, r.precipitationMm, r.precipitationKnown);
 
   // The daily block is treated as optional: a missing or null entry leaves
   // the forecast simply unknown rather than failing the whole fetch, since
