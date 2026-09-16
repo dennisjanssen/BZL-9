@@ -1,5 +1,7 @@
 # BZL-9
 
+https://github.com/user-attachments/assets/0fcf9ad3-76ea-43ac-a860-5e078593afe3
+
 A small desk companion. An ESP32-C6 drives a 1.47" LCD showing a procedurally
 animated face — it blinks, looks around, yawns, gets bored, wears sunglasses when
 the sun is out, and nags you to drink water. The screen is meant to be mounted as
