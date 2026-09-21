@@ -29,8 +29,17 @@ void setBrightnessPercent(uint8_t percent);
 // "fades to the configured sleep brightness over two seconds").
 void fadeBrightnessPercent(uint8_t percent, uint32_t durationMs);
 
+// True while a self-contained animation owns the face: a one-shot
+// expression, a glitch, a whistle, or a weather cameo. main.cpp feeds this
+// to MoodEngine so reminders queue behind whatever is already playing
+// instead of cutting across it.
+bool isBusy();
+
 // Called once a second from main.cpp with MoodEngine's current effective
-// state (base mood or an active reminder/glitch overlay).
+// state (base mood or an active reminder/glitch overlay). A state change
+// arriving while isBusy() is deferred to a later call rather than applied
+// mid-animation; since this is called every second with the current state,
+// the change simply lands on the first free tick.
 void applyMoodState(MoodEngine::State state);
 
 // Today's rain forecast, as opposed to current conditions. Drives an

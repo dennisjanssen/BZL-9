@@ -2884,6 +2884,22 @@ void weatherSimEndCb(lv_timer_t *) {
   refreshWeatherEffect();
 }
 
+// --- "the face is mid-animation" ---------------------------------------
+// Every condition here is ended by a timer the animation owns, so this
+// always clears on its own within a few seconds.
+//
+// Deliberately EXCLUDES the hydration and movement routines. Those are
+// driven by the mood state itself, so counting them as busy would defer
+// the very applyMoodState() call that stops them -- the routine would keep
+// restarting and the reminder would never end.
+bool faceIsBusy() {
+  return expressionTimer != nullptr ||  // a one-shot expression is holding
+         glitchActive ||                // mid-glitch
+         whistling ||                   // ~5.5s burst, owns mouth and tilt
+         rainCameoActive ||             // the cloud is on screen
+         sunglassesVisible;             // shades down, or lifting away
+}
+
 }  // namespace
 
 namespace DisplayEngine {
@@ -3193,9 +3209,34 @@ void fadeBrightnessPercent(uint8_t percent, uint32_t durationMs) {
   lv_anim_start(&a);
 }
 
+// Longest legitimate busy window is the sunglasses cameo at about 7.7s,
+// so this only ever fires if a future busy condition forgets to clear.
+// Without it, one stuck flag would freeze the mood system permanently.
+constexpr uint32_t kMaxMoodDeferMs = 12000;
+
+bool isBusy() { return faceIsBusy(); }
+
 void applyMoodState(MoodEngine::State state) {
   static MoodEngine::State lastState = MoodEngine::State::NEUTRAL;
+  static uint32_t deferStartMs = 0;
   bool stateChanged = (state != lastState);
+
+  // Let the face finish what it is doing. A mood roll landing mid-blink is
+  // invisible; landing mid-wave looks like the device was unplugged and
+  // restarted, because setIdleLevel() below deletes the gaze, yaw, tilt,
+  // mouth and squint animations the expression is made of.
+  //
+  // Returning WITHOUT updating lastState is the whole trick: the next tick
+  // sees the same change again and applies it the moment the face is free.
+  // No pending-state bookkeeping, no risk of losing a transition -- this
+  // is called every second with whatever the state currently is.
+  if (stateChanged && faceIsBusy()) {
+    uint32_t now = millis();
+    if (deferStartMs == 0) deferStartMs = now;
+    if (now - deferStartMs < kMaxMoodDeferMs) return;
+  }
+  deferStartMs = 0;
+
   lastState = state;
 
   // The full sustained pose for this state. Everything here is a resting

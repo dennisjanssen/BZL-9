@@ -30,6 +30,9 @@ constexpr uint32_t kMoodHoldMaxMs = 10UL * 60000UL;
 State dayMood = State::NEUTRAL;
 uint32_t moodRemainingMs = 0;
 
+// Set once a second from main.cpp; see setOverlaysHeld().
+bool overlaysHeld = false;
+
 bool moodOverride = false;
 State moodOverrideState = State::NEUTRAL;
 // What was running before the override took hold, so it can be resumed.
@@ -166,6 +169,9 @@ void maybeStartOverlay(const TimeInput &time) {
   // another.
   if (overlay != Overlay::NONE || baseState == State::SLEEPING) return;
   if (baseState == State::SLEEPY) return;  // let the wind-down read as a wind-down
+  // The face is mid-animation. Don't cut across it -- the elapsed counters
+  // keep climbing, so a reminder due right now fires as soon as it frees up.
+  if (overlaysHeld) return;
 
   const auto &cfg = ConfigStore::get();
   // Normally reminders are a workday thing. With the schedule off there is
@@ -217,6 +223,8 @@ void init() {
   moodRemainingMs = 0;
   moodOverride = false;
 }
+
+void setOverlaysHeld(bool held) { overlaysHeld = held; }
 
 void update(const TimeInput &time) {
   lastTimeKnown = time.timeKnown;

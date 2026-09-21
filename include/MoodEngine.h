@@ -58,6 +58,12 @@ bool dayMoodOverridden();
 
 // Call exactly once per second -- reminder/glitch timing assumes a fixed
 // 1s step rather than measuring elapsed time itself.
+// While held, no reminder or glitch overlay is started. Nothing is lost:
+// the interval counters keep running, so a reminder that came due during
+// a hold fires on the first tick after it lifts. Set from main.cpp out of
+// DisplayEngine::isBusy().
+void setOverlaysHeld(bool held);
+
 void update(const TimeInput &time);
 
 // Effective state: an active reminder/glitch overlay takes priority over

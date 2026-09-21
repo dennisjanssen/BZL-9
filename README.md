@@ -454,7 +454,7 @@ any `lv_label`.**
 
 ## Design notes
 
-Two things are load-bearing and easy to break:
+Three things are load-bearing and easy to break:
 
 - **The animation layer composites.** Every animation writes one field of a shared
   channel struct and then calls `renderFace()`, which is the sole owner of object
@@ -464,6 +464,14 @@ Two things are load-bearing and easy to break:
 - **Head turns fake 3D.** Features ride a virtual cylinder, so the eye turning
   away narrows and slides toward the edge while the near eye widens. That
   differential is why a turn reads as a head rather than a sliding picture.
+- **Animations are not interrupted.** While an expression, glitch, whistle or
+  weather cameo is playing, `DisplayEngine::isBusy()` is true, and both mood
+  changes and reminder overlays wait for it. Nothing is dropped — the interval
+  counters keep running and a mood change is simply re-offered on the next
+  one-second tick — so a reminder may arrive a few seconds late rather than
+  cutting a wave in half. Every busy condition ends on a timer the animation
+  owns; there is a 12-second cap in `applyMoodState()` purely so a future one
+  that forgets to clear cannot freeze the mood system.
 
 `include/Config.h` carries the hardware facts, each with a note on where it was
 sourced from. Anything genuinely undecided is marked `ASSUMPTION` in the source.

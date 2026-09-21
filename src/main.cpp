@@ -65,6 +65,10 @@ MoodEngine::TimeInput getTimeInput() {
 }
 
 void tick() {
+  // Queue reminders and glitches behind whatever the face is already
+  // playing. Nothing is dropped -- MoodEngine keeps counting, so anything
+  // that came due during an animation fires the moment it ends.
+  MoodEngine::setOverlaysHeld(DisplayEngine::isBusy());
   MoodEngine::update(getTimeInput());
 
   auto state = MoodEngine::currentState();
