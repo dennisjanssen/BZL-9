@@ -15,6 +15,11 @@ enum class Overlay { NONE, RAIN, SUNGLASSES, SHIVER };
 struct Reading {
   bool available = false;  // false until the first successful fetch ever
   bool stale = false;      // true once the last successful fetch is >1h old
+  // Milliseconds since the last successful fetch; 0 if there has never
+  // been one. Callers decide for themselves how old is too old -- the
+  // face stops trusting a reading long before the dashboard calls it
+  // stale, because a wrong overlay is worse than no overlay.
+  uint32_t ageMs = 0;
   float temperatureC = 0.0f;
   int weatherCode = -1;
   float precipitationMm = 0.0f;

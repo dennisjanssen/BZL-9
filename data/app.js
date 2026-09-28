@@ -8,6 +8,26 @@ function timeToMinutes(t) {
   return h * 60 + m;
 }
 
+// WMO weather interpretation codes, verbatim from Open-Meteo's docs.
+// Kept in the dashboard rather than the firmware on purpose: it is ~700
+// bytes of strings that only ever get read by a human looking at this
+// page, and flash is the scarce resource on the device, not here.
+const WMO = {
+  0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+  45: "fog", 48: "depositing rime fog",
+  51: "light drizzle", 53: "moderate drizzle", 55: "dense drizzle",
+  56: "light freezing drizzle", 57: "dense freezing drizzle",
+  61: "slight rain", 63: "moderate rain", 65: "heavy rain",
+  66: "light freezing rain", 67: "heavy freezing rain",
+  71: "slight snowfall", 73: "moderate snowfall", 75: "heavy snowfall",
+  77: "snow grains",
+  80: "slight rain showers", 81: "moderate rain showers",
+  82: "violent rain showers",
+  85: "slight snow showers", 86: "heavy snow showers",
+  95: "thunderstorm", 96: "thunderstorm with slight hail",
+  97: "heavy thunderstorm", 99: "thunderstorm with heavy hail",
+};
+
 async function pollStatus() {
   try {
     const res = await fetch("/api/status");
@@ -30,10 +50,19 @@ async function pollStatus() {
 
     let wxText = "not yet fetched";
     if (s.weather) {
-      wxText = Math.round(s.weather.temperatureC * 10) / 10 + "°C, code " + s.weather.weatherCode;
+      // The number stays visible alongside the words: it is what you
+      // quote when comparing against the API by hand.
+      const code = s.weather.weatherCode;
+      const meaning = WMO[code] || "unrecognised";
+      wxText = Math.round(s.weather.temperatureC * 10) / 10 + "°C, " + meaning + " (code " + code + ")";
       if (s.weather.rainExpectedToday) {
         wxText += " · rain later (" + s.weather.rainChancePercent + "%)";
       }
+      // Age is the first thing to look at when the face disagrees with the
+      // sky: past 30 minutes the overlay is dropped and the face shows
+      // nothing, so "reading is 41m old" explains an otherwise blank face.
+      const age = s.weather.ageSeconds;
+      if (age >= 60) wxText += " \u00b7 " + Math.floor(age / 60) + "m old";
       if (s.weather.stale) wxText += " (stale)";
     }
     document.getElementById("f-weather").textContent = wxText;

@@ -342,6 +342,9 @@ void handleStatus(AsyncWebServerRequest *request) {
     w["weatherCode"] = weather.weatherCode;
     w["precipitationMm"] = weather.precipitationMm;
     w["stale"] = weather.stale;
+    // Seconds since the last successful fetch. The single most useful
+    // number when the face disagrees with the sky.
+    w["ageSeconds"] = weather.ageMs / 1000;
     w["rainChancePercent"] = weather.rainChancePercent;
     w["rainSumMm"] = weather.rainSumMm;
     w["rainExpectedToday"] = weather.rainExpectedToday;

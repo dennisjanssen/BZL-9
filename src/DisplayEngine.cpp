@@ -2425,8 +2425,13 @@ void stopWeatherEffects() {
   if (rainTimer != nullptr) {
     lv_timer_del(rainTimer);
     rainTimer = nullptr;
-    for (auto *streak : rainStreaks) lv_obj_add_flag(streak, LV_OBJ_FLAG_HIDDEN);
   }
+  // Hidden unconditionally, NOT inside the check above. startWeatherEffect()
+  // un-hides the streaks and only then creates the timer, so a failed
+  // lv_timer_create() would leave them visible with rainTimer null -- and
+  // this function, gated on that pointer, could never hide them again.
+  // Frozen rain, permanently, with no way back short of a reboot.
+  for (auto *streak : rainStreaks) lv_obj_add_flag(streak, LV_OBJ_FLAG_HIDDEN);
   if (shadesCameoTimer != nullptr) {
     lv_timer_del(shadesCameoTimer);
     shadesCameoTimer = nullptr;

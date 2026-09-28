@@ -87,7 +87,12 @@ bool isRainCode(int code) {
     case 51: case 53: case 55: case 56: case 57:
     case 61: case 63: case 65: case 66: case 67:
     case 80: case 81: case 82:
-    case 95: case 96: case 99:
+    // 97 is "heavy thunderstorm". It was missing here, so a heavy storm
+    // logged as an unmapped code and showed nothing. Open-Meteo's docs
+    // note that only models with explicit hail forecasting (DWD ICON,
+    // UKMO) emit 96/99 -- the rest report 95 and 97 -- so this is not an
+    // exotic value, it is the common one for half the models.
+    case 95: case 96: case 97: case 99:
       return true;
     default:
       return false;
@@ -259,13 +264,6 @@ void task(void *) {
       }
     }
 
-    if (everSucceeded) {
-      bool stale = (millis() - lastSuccessMs) > kStaleAfterMs;
-      xSemaphoreTake(mutex, portMAX_DELAY);
-      snapshot.stale = stale;
-      xSemaphoreGive(mutex);
-    }
-
     uint32_t waitMs;
     if (fetched) {
       failRetryMs = kFailRetryMinMs;
@@ -304,6 +302,18 @@ Reading current() {
   xSemaphoreTake(mutex, portMAX_DELAY);
   Reading r = snapshot;
   xSemaphoreGive(mutex);
+
+  // Age is derived HERE rather than stamped by the poll loop. The loop
+  // only comes round at the poll interval -- or, when fetches are failing,
+  // at a backoff of up to five minutes -- so a reading could sit marked
+  // fresh for minutes after it had actually gone off.
+  //
+  // `lastSuccessMs` and `everSucceeded` are written by the poll task
+  // without the mutex, but both are single aligned words on a 32-bit
+  // core, so the read is benign: worst case we see the value from just
+  // before a fetch landed and report an age one poll too high.
+  r.ageMs = everSucceeded ? millis() - lastSuccessMs : 0;
+  r.stale = everSucceeded && r.ageMs > kStaleAfterMs;
   return r;
 }
 

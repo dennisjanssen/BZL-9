@@ -352,7 +352,7 @@ rejected with HTTP 400 rather than silently clamped.
 | Hydration reminder | 60 min | 5–480 |
 | Movement reminder | 45 min | 5–480 |
 | Latitude / longitude | 50.8503 / 4.3517 | ±90 / ±180 |
-| Weather poll | 15 min | 5–180 |
+| Weather poll² | 15 min | 5–180 |
 | Active brightness | 50% | 1–50 |
 | Sleep brightness | 5% | 0–50 |
 | Glitch avg. interval¹ | 10 min | 1–120 |
@@ -360,6 +360,15 @@ rejected with HTTP 400 rather than silently clamped.
 | Onboard LED | off, dim white | 0–255 per channel |
 
 ¹ Settable via the API only; it has no field in the dashboard form.
+
+² Open-Meteo builds current conditions from **15-minutely** model data, so
+polling faster than that returns the same numbers again — the default matches
+the source. Dropping it to 5 minutes is still worth it if you want the face to
+notice a change sooner (it cuts worst-case lag from 15 minutes to 5) and costs
+288 calls a day against a free allowance of 10,000. Below 5 there is nothing
+left to gain. A reading older than twice the poll interval (minimum 15 minutes)
+stops driving the face entirely — it shows nothing rather than asserting stale
+weather.
 
 ### API
 

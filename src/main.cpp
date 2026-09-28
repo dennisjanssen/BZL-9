@@ -77,10 +77,36 @@ void tick() {
 
   DisplayEngine::applyMoodState(state);
   auto wx = WeatherService::current();
-  DisplayEngine::applyWeatherOverlay(wx.overlay);
+  // Past this age a reading is not weather any more, it is a memory.
+  //
+  // Scaled to the configured poll interval rather than fixed, so it stays
+  // proportionate at any cadence: two missed polls, whatever the user set.
+  // A fixed value would tolerate six consecutive failures at a 5-minute
+  // poll and barely one at 60.
+  //
+  // Floored at 15 minutes because that is Open-Meteo's own granularity --
+  // current conditions come from 15-minutely model data -- so refusing to
+  // show a reading before even one data cycle has elapsed would be
+  // blanking the face over nothing.
+  //
+  // Deliberately much shorter than Reading::stale (an hour, per the
+  // brief): that flag is a dashboard badge, whereas this decides whether
+  // the face asserts something about the world.
+  //
+  // Without this the face kept raining indefinitely whenever fetches
+  // started failing -- it held the last successful reading forever and
+  // nothing ever looked at how old it was.
+  constexpr uint32_t kWeatherAgeFloorMs = 15UL * 60000UL;
+  uint32_t maxAgeMs =
+      static_cast<uint32_t>(ConfigStore::get().weatherPollIntervalMinutes) * 2UL * 60000UL;
+  if (maxAgeMs < kWeatherAgeFloorMs) maxAgeMs = kWeatherAgeFloorMs;
+  bool wxUsable = wx.available && wx.ageMs <= maxAgeMs;
+
+  DisplayEngine::applyWeatherOverlay(wxUsable ? wx.overlay
+                                              : WeatherService::Overlay::NONE);
   // No point warning that rain is coming while it is already raining --
   // the RAIN overlay is already saying so, louder.
-  DisplayEngine::applyRainForecast(wx.rainExpectedToday &&
+  DisplayEngine::applyRainForecast(wxUsable && wx.rainExpectedToday &&
                                    wx.overlay != WeatherService::Overlay::RAIN);
 
   bool sleeping = state == MoodEngine::State::SLEEPING;
